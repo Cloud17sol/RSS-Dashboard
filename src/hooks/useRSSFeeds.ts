@@ -46,7 +46,58 @@ const pruneSeenForFeedIds = (feedIds: Set<string>, raw: SeenMapState) => {
 
 /** Limits parallel rss2json calls (free tier rate-limits hard on burst). */
 const REFRESH_CONCURRENCY = 5;
-const REFRESH_BATCH_GAP_MS = 500;
+const REFRESH_BATCH_GAP_MS = 150;
+
+const FEED_CACHE_KEY = 'naija_rss_feed_items_v1';
+const FEED_CACHE_TTL_MS = 10 * 60 * 1000;
+
+type FeedCacheState = Record<string, {
+  items: FeedItem[];
+  lastRefresh: string | null;
+}>;
+
+const readFeedCache = (): FeedCacheState => {
+  try {
+    const raw = localStorage.getItem(FEED_CACHE_KEY);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw) as {
+      timestamp?: number;
+      feeds?: FeedCacheState;
+    };
+
+    if (!parsed.timestamp || !parsed.feeds) return {};
+    if (Date.now() - parsed.timestamp > FEED_CACHE_TTL_MS) return {};
+
+    return parsed.feeds;
+  } catch {
+    return {};
+  }
+};
+
+const writeFeedCache = (feeds: Feed[]) => {
+  try {
+    const next: FeedCacheState = {};
+
+    for (const feed of feeds) {
+      if (!feed.items.length) continue;
+      next[feed.id] = {
+        items: feed.items,
+        lastRefresh: feed.lastRefresh ? feed.lastRefresh.toISOString() : null
+      };
+    }
+
+    localStorage.setItem(
+      FEED_CACHE_KEY,
+      JSON.stringify({
+        timestamp: Date.now(),
+        feeds: next
+      })
+    );
+  } catch {
+    // Ignore cache write failures.
+  }
+};
 
 const mapRss2JsonItem = (i: Record<string, unknown>, fallbackUrl: string): FeedItem => ({
   title: (i.title as string) || '(no title)',
@@ -489,6 +540,7 @@ const useRSSFeeds = () => {
   // Reset to defaults
   const resetToDefaults = async () => {
     Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key));
+    localStorage.removeItem(FEED_CACHE_KEY);
     
     const defaultFeeds = DEFAULT_FEEDS.map(f => ({
       id: stableFeedId(f.url),
@@ -516,28 +568,39 @@ const useRSSFeeds = () => {
   useEffect(() => {
     const initializeFeeds = async () => {
       const saved = getSavedFeeds();
+      const cachedFeeds = readFeedCache();
       
       let initialFeeds: Feed[];
       if (saved && saved.length) {
-        initialFeeds = saved.map((f: SavedFeedRow) => ({
-          id: idForSavedRow(f),
-          name: f.name,
-          url: f.url,
-          items: [],
-          status: 'ok' as const,
-          newCount: 0,
-          expanded: false
-        }));
+        initialFeeds = saved.map((f: SavedFeedRow) => {
+          const id = idForSavedRow(f);
+          const cached = cachedFeeds[id];
+          return {
+            id,
+            name: f.name,
+            url: f.url,
+            items: cached?.items ?? [],
+            lastRefresh: cached?.lastRefresh ? new Date(cached.lastRefresh) : undefined,
+            status: 'ok' as const,
+            newCount: 0,
+            expanded: false
+          };
+        });
       } else {
-        initialFeeds = DEFAULT_FEEDS.map(f => ({
-          id: stableFeedId(f.url),
-          name: f.name,
-          url: f.url,
-          items: [],
-          status: 'ok' as const,
-          newCount: 0,
-          expanded: false
-        }));
+        initialFeeds = DEFAULT_FEEDS.map(f => {
+          const id = stableFeedId(f.url);
+          const cached = cachedFeeds[id];
+          return {
+            id,
+            name: f.name,
+            url: f.url,
+            items: cached?.items ?? [],
+            lastRefresh: cached?.lastRefresh ? new Date(cached.lastRefresh) : undefined,
+            status: 'ok' as const,
+            newCount: 0,
+            expanded: false
+          };
+        });
         saveFeeds(initialFeeds);
       }
 
@@ -574,6 +637,10 @@ const useRSSFeeds = () => {
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
   }, [startTimer]);
+
+  useEffect(() => {
+    writeFeedCache(feeds);
+  }, [feeds]);
 
   return {
     feeds,

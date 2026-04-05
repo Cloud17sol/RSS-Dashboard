@@ -6,6 +6,7 @@
   --border: #e5e7eb;
   --accent: #ff6a00;
   --accent-2: #2563eb;
+  --feed-badge-bg: #6d28d9;
   --ok: #10b981;
   --err: #ef4444;
   --shadow: 0 6px 20px rgba(0,0,0,0.08);
@@ -21,6 +22,7 @@
   --border: #242a36;
   --accent: #ff8a3d;
   --accent-2: #60a5fa;
+  --feed-badge-bg: #8b5cf6;
   --ok: #34d399;
   --err: #f87171;
   --shadow: 0 8px 24px rgba(0,0,0,0.35);
@@ -850,7 +852,7 @@ html {
 
 .search-summary p {
   margin: 0;
-  color: var(--muted);
+  color: var(--text);
 }
 
 .no-results,
@@ -925,8 +927,8 @@ html {
 }
 
 .feed-badge {
-  background: var(--accent);
-  color: white;
+  background: var(--feed-badge-bg);
+  color: #fff;
   padding: 4px 8px;
   border-radius: 6px;
   font-size: 12px;
@@ -953,7 +955,7 @@ html {
 .result-meta {
   display: flex;
   align-items: center;
-  color: var(--muted);
+  color: var(--text);
   font-size: 14px;
   margin-bottom: 12px;
 }
@@ -974,16 +976,11 @@ html {
 }
 
 .search-highlight {
-  background: rgba(255, 106, 0, 0.2);
-  color: var(--accent);
+  background: var(--accent);
+  color: #fff;
   padding: 2px 4px;
   border-radius: 4px;
   font-weight: 600;
-}
-
-:root.dark .search-highlight {
-  background: rgba(255, 138, 61, 0.3);
-  color: var(--accent);
 }
 
 /* Fix for all input and select fields in light mode */

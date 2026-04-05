@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, Fragment } from 'react';
 import { Search, Filter, Calendar, ExternalLink, X } from 'lucide-react';
 
 interface FeedItem {
@@ -24,7 +24,7 @@ interface SearchResult {
   feedId: string;
   feedName: string;
   item: FeedItem;
-  matchType: 'title' | 'content';
+  matchType: 'title' | 'content' | 'newspaper';
   matchText: string;
 }
 
@@ -56,14 +56,18 @@ const SearchTab: React.FC<SearchTabProps> = ({ feeds }) => {
 
   const highlightText = (text: string, query: string) => {
     if (!query.trim()) return text;
-    
-    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    const parts = text.split(regex);
-    
-    return parts.map((part, index) => 
-      regex.test(part) ? (
+
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+
+    // With one capturing group, split() puts matches at odd indexes — do not use
+    // regex.test() in a loop with the /g flag (lastIndex breaks alternating calls).
+    return parts.map((part, index) =>
+      index % 2 === 1 ? (
         <mark key={index} className="search-highlight">{part}</mark>
-      ) : part
+      ) : (
+        <Fragment key={index}>{part}</Fragment>
+      )
     );
   };
 
@@ -77,6 +81,9 @@ const SearchTab: React.FC<SearchTabProps> = ({ feeds }) => {
       : feeds;
 
     feedsToSearch.forEach(feed => {
+      const feedNameLower = feed.name.toLowerCase();
+      const feedNameMatches = feedNameLower.includes(query);
+
       feed.items.forEach(item => {
         const title = item.title.toLowerCase();
         const content = stripHtml(item.content).toLowerCase();
@@ -92,7 +99,7 @@ const SearchTab: React.FC<SearchTabProps> = ({ feeds }) => {
           if (dateFilter === 'month' && daysDiff > 30) return;
         }
 
-        // Check for matches
+        // Check for matches (title/content first; newspaper name lists all articles from that source)
         if (title.includes(query)) {
           results.push({
             feedId: feed.id,
@@ -114,6 +121,14 @@ const SearchTab: React.FC<SearchTabProps> = ({ feeds }) => {
             item,
             matchType: 'content',
             matchText: matchingSentence?.trim() || content.substring(0, 200)
+          });
+        } else if (feedNameMatches) {
+          results.push({
+            feedId: feed.id,
+            feedName: feed.name,
+            item,
+            matchType: 'newspaper',
+            matchText: feed.name
           });
         }
       });
@@ -154,7 +169,7 @@ const SearchTab: React.FC<SearchTabProps> = ({ feeds }) => {
         <div className="search-input-wrapper">
           <input
             type="text"
-            placeholder="Search articles across all feeds..."
+            placeholder="Search by keyword, topic, or newspaper name..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="search-input"
@@ -256,10 +271,11 @@ const SearchTab: React.FC<SearchTabProps> = ({ feeds }) => {
           <div className="search-placeholder">
             <Search className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h3>Search Nigerian News</h3>
-            <p>Enter keywords to search across all your RSS feeds</p>
+            <p>Enter keywords or a newspaper name to search across your RSS feeds</p>
             <div className="search-tips">
               <h4>Search Tips:</h4>
               <ul>
+                <li>Type part of a newspaper name to see all articles from that feed</li>
                 <li>Use specific keywords for better results</li>
                 <li>Filter by specific feeds to narrow results</li>
                 <li>Use date filters to find recent articles</li>
@@ -273,9 +289,13 @@ const SearchTab: React.FC<SearchTabProps> = ({ feeds }) => {
           {searchResults.map((result, index) => (
             <article key={index} className="search-result-card">
               <div className="result-header">
-                <span className="feed-badge">{result.feedName}</span>
+                <span className="feed-badge">{highlightText(result.feedName, searchQuery)}</span>
                 <span className="match-type-badge">
-                  {result.matchType === 'title' ? 'Title' : 'Content'}
+                  {result.matchType === 'title'
+                    ? 'Title'
+                    : result.matchType === 'content'
+                      ? 'Content'
+                      : 'Newspaper'}
                 </span>
               </div>
               

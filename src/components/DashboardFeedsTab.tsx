@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ListPlus, Settings } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { ListPlus, Search, Settings } from 'lucide-react';
 import { feedShowsOnDashboard, type Feed } from '../hooks/useRSSFeeds';
 
 interface DashboardFeedsTabProps {
@@ -16,6 +16,16 @@ const DashboardFeedsTab: React.FC<DashboardFeedsTabProps> = ({
   onOpenSettings
 }) => {
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [nameQuery, setNameQuery] = useState('');
+
+  const filteredFeeds = useMemo(() => {
+    const q = nameQuery.trim().toLowerCase();
+    if (!q) return feeds;
+    return feeds.filter(
+      f =>
+        f.name.toLowerCase().includes(q) || f.url.toLowerCase().includes(q)
+    );
+  }, [feeds, nameQuery]);
 
   const toggleDashboard = async (feed: Feed) => {
     const nextShow = !feedShowsOnDashboard(feed);
@@ -67,13 +77,40 @@ const DashboardFeedsTab: React.FC<DashboardFeedsTabProps> = ({
         </div>
       </div>
 
+      {feeds.length > 0 && (
+        <div className="mb-4">
+          <label htmlFor="dashboard-feeds-search" className="sr-only">
+            Search feeds by name
+          </label>
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              aria-hidden
+            />
+            <input
+              id="dashboard-feeds-search"
+              type="search"
+              value={nameQuery}
+              onChange={e => setNameQuery(e.target.value)}
+              placeholder="Search by news name…"
+              autoComplete="off"
+              className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-10 pr-3 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+            />
+          </div>
+        </div>
+      )}
+
       {feeds.length === 0 ? (
         <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 py-10 text-center text-gray-600 dark:border-gray-600 dark:bg-gray-800/50 dark:text-gray-400">
           No feeds yet. Add RSS URLs in Settings first.
         </p>
+      ) : filteredFeeds.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-gray-300 bg-gray-50 py-10 text-center text-gray-600 dark:border-gray-600 dark:bg-gray-800/50 dark:text-gray-400">
+          No feeds match &ldquo;{nameQuery.trim()}&rdquo;. Try another name.
+        </p>
       ) : (
         <ul className="space-y-2" role="list">
-          {feeds.map(feed => {
+          {filteredFeeds.map(feed => {
             const on = feedShowsOnDashboard(feed);
             const connected = feed.status === 'ok';
             const busy = loadingId === feed.id;

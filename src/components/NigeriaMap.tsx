@@ -1,6 +1,14 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from 'react-leaflet';
 import { MapPin, Zap } from 'lucide-react';
 import { nigeriaStates, State } from '../data/nigeriaStates';
+import {
+  NIGERIA_BOUNDS,
+  NIGERIA_DEFAULT_ZOOM,
+  NIGERIA_MAP_CENTER,
+  stateMapLatLng
+} from '../data/nigeriaStateMapCoords';
+import 'leaflet/dist/leaflet.css';
 
 interface NigeriaMapProps {
   onStateClick: (state: State) => void;
@@ -8,185 +16,213 @@ interface NigeriaMapProps {
   stateCounts?: Record<string, number>;
 }
 
-const stateCoordinates: Record<string, { x: number; y: number }> = {
-  'Abia': { x: 75, y: 60 },
-  'Adamawa': { x: 70, y: 15 },
-  'Akwa Ibom': { x: 80, y: 70 },
-  'Anambra': { x: 68, y: 52 },
-  'Bauchi': { x: 55, y: 25 },
-  'Bayelsa': { x: 65, y: 75 },
-  'Benue': { x: 60, y: 45 },
-  'Borno': { x: 75, y: 10 },
-  'Cross River': { x: 82, y: 65 },
-  'Delta': { x: 62, y: 68 },
-  'Ebonyi': { x: 72, y: 55 },
-  'Edo': { x: 58, y: 62 },
-  'Ekiti': { x: 48, y: 62 },
-  'Enugu': { x: 70, y: 52 },
-  'Gombe': { x: 62, y: 20 },
-  'Imo': { x: 72, y: 60 },
-  'Jigawa': { x: 40, y: 18 },
-  'Kaduna': { x: 48, y: 30 },
-  'Kano': { x: 38, y: 15 },
-  'Katsina': { x: 35, y: 12 },
-  'Kebbi': { x: 28, y: 20 },
-  'Kogi': { x: 58, y: 48 },
-  'Kwara': { x: 48, y: 50 },
-  'Lagos': { x: 42, y: 75 },
-  'Nasarawa': { x: 58, y: 40 },
-  'Niger': { x: 50, y: 38 },
-  'Ogun': { x: 45, y: 70 },
-  'Ondo': { x: 52, y: 68 },
-  'Osun': { x: 48, y: 65 },
-  'Oyo': { x: 45, y: 60 },
-  'Plateau': { x: 55, y: 35 },
-  'Rivers': { x: 68, y: 75 },
-  'Sokoto': { x: 25, y: 18 },
-  'Taraba': { x: 65, y: 30 },
-  'Yobe': { x: 58, y: 12 },
-  'Zamfara': { x: 32, y: 20 },
-  'FCT': { x: 52, y: 42 }
+function useMapFollowsDarkMode() {
+  const [dark, setDark] = useState(
+    () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+  );
+
+  useEffect(() => {
+    const el = document.documentElement;
+    const sync = () => setDark(el.classList.contains('dark'));
+    const mo = new MutationObserver(sync);
+    mo.observe(el, { attributes: true, attributeFilter: ['class'] });
+    return () => mo.disconnect();
+  }, []);
+
+  return dark;
+}
+
+function MapThemeTiles({ dark }: { dark: boolean }) {
+  const map = useMap();
+
+  useEffect(() => {
+    map.invalidateSize();
+  }, [dark, map]);
+
+  if (dark) {
+    return (
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+        subdomains="abcd"
+        maxZoom={20}
+      />
+    );
+  }
+
+  return (
+    <TileLayer
+      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+      subdomains="abcd"
+      maxZoom={20}
+    />
+  );
+}
+
+const getCountColor = (count: number): string => {
+  if (count === 0) return '#9ca3af';
+  if (count < 5) return '#22c55e';
+  if (count < 15) return '#0ea5e9';
+  if (count < 30) return '#f97316';
+  return '#dc2626';
 };
 
-const NigeriaMap: React.FC<NigeriaMapProps> = ({
+const bubbleRadiusPx = (count: number, selected: boolean): number => {
+  const base = count === 0 ? 6 : 7 + Math.sqrt(count) * 3.2;
+  const capped = Math.min(base, 36);
+  return selected ? capped + 4 : capped;
+};
+
+const NigeriaMapLeaflet: React.FC<NigeriaMapProps> = ({
   onStateClick,
   selectedState,
   stateCounts = {}
 }) => {
-  const getCountColor = (count: number): string => {
-    if (count === 0) return '#e5e7eb';
-    if (count < 5) return '#4ade80';
-    if (count < 15) return '#0ea5e9';
-    if (count < 30) return '#f97316';
-    return '#dc2626';
-  };
+  const dark = useMapFollowsDarkMode();
 
-  const getRadius = (count: number): number => {
-    if (count === 0) return 3.5;
-    return Math.min(3.5 + (count / 10), 8);
-  };
-
-  const stateNodes = useMemo(() => {
+  const markers = useMemo(() => {
     return nigeriaStates.map(state => {
-      const coords = stateCoordinates[state.name];
+      const latLng = stateMapLatLng[state.name];
+      if (!latLng) return null;
+
       const count = stateCounts[state.name] || 0;
       const isSelected = selectedState?.name === state.name;
-
-      if (!coords) return null;
+      const fill = isSelected ? '#ea580c' : getCountColor(count);
+      const stroke = dark ? '#1f2937' : '#ffffff';
 
       return (
-        <g key={state.name}>
-          <circle
-            cx={coords.x}
-            cy={coords.y}
-            r={getRadius(count)}
-            fill={isSelected ? '#f97316' : getCountColor(count)}
-            opacity={isSelected ? 1 : 0.8}
-            className="cursor-pointer hover:opacity-100 transition-all duration-200"
-            onClick={() => onStateClick(state)}
-            style={{
-              filter: isSelected ? 'drop-shadow(0 0 8px rgba(249, 115, 22, 0.6))' : 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1))'
-            }}
-          />
-          {count > 0 && (
-            <text
-              x={coords.x}
-              y={coords.y - (getRadius(count) + 3)}
-              textAnchor="middle"
-              fontSize="9"
-              fontWeight="bold"
-              fill="#1f2937"
-              className="pointer-events-none font-semibold"
-            >
-              {count}
-            </text>
-          )}
-          <title className="pointer-events-none">
-            {state.name}: {state.capital} ({count} headlines)
-          </title>
-        </g>
+        <CircleMarker
+          key={state.name}
+          center={latLng}
+          radius={bubbleRadiusPx(count, isSelected)}
+          pathOptions={{
+            fillColor: fill,
+            color: stroke,
+            weight: isSelected ? 3 : 1.5,
+            opacity: 1,
+            fillOpacity: isSelected ? 0.95 : count === 0 ? 0.35 : 0.82
+          }}
+          eventHandlers={{
+            click: () => onStateClick(state)
+          }}
+        >
+          <Tooltip
+            direction="top"
+            offset={[0, -6]}
+            opacity={1}
+            className="!rounded-md !border-0 !px-2 !py-1 !text-xs !font-semibold !shadow-md dark:!bg-gray-800 dark:!text-gray-100"
+          >
+            <span className="block font-bold text-gray-900 dark:text-white">{state.name}</span>
+            <span className="text-gray-600 dark:text-gray-300">
+              {count} headline{count === 1 ? '' : 's'}
+            </span>
+          </Tooltip>
+        </CircleMarker>
       );
-    }).filter(Boolean);
-  }, [selectedState, stateCounts]);
-
-  const totalHeadlines = Object.values(stateCounts).reduce((a, b) => a + b, 0);
+    });
+  }, [dark, onStateClick, selectedState, stateCounts]);
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+    <div className="relative overflow-hidden rounded-xl border border-gray-200 dark:border-gray-600 shadow-inner">
+      <MapContainer
+        center={NIGERIA_MAP_CENTER}
+        zoom={NIGERIA_DEFAULT_ZOOM}
+        minZoom={5}
+        maxZoom={11}
+        maxBounds={NIGERIA_BOUNDS}
+        maxBoundsViscosity={0.9}
+        scrollWheelZoom
+        className="z-0 h-[min(520px,72vh)] w-full rounded-xl [&_.leaflet-control-attribution]:text-[10px] [&_.leaflet-control-attribution]:bg-white/90 [&_.leaflet-control-attribution]:dark:bg-gray-900/90"
+        aria-label="Map of Nigeria with headline counts by state"
+      >
+        <MapThemeTiles dark={dark} />
+        {markers}
+      </MapContainer>
+    </div>
+  );
+};
+
+const NigeriaMap: React.FC<NigeriaMapProps> = (props) => {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const totalHeadlines = Object.values(props.stateCounts || {}).reduce((a, b) => a + b, 0);
+
+  return (
+    <div className="rounded-lg bg-white p-6 shadow-md dark:bg-gray-800">
       <div className="mb-4">
-        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
-          <MapPin className="w-5 h-5 text-orange-500" />
-          Nigeria State Map
+        <h3 className="mb-1 flex items-center gap-2 text-lg font-bold text-gray-900 dark:text-white">
+          <MapPin className="h-5 w-5 text-orange-500" />
+          Nigeria — live map
         </h3>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Click on any state to view details. Bubble size indicates news headline frequency.
+          OpenStreetMap basemap with bubble size and color by headline mentions. Click a bubble for
+          state details.
         </p>
       </div>
 
-      <svg
-        viewBox="0 0 100 85"
-        className="w-full border border-gray-200 dark:border-gray-700 rounded-lg bg-gradient-to-br from-blue-50 to-green-50 dark:from-gray-700 dark:to-gray-700"
-      >
-        <defs>
-          <filter id="mapShadow">
-            <feDropShadow dx="0" dy="1" stdDeviation="1.5" floodOpacity="0.2" />
-          </filter>
-        </defs>
-
-        <text x="50" y="4" textAnchor="middle" fontSize="8" fill="#9ca3af" className="dark:fill-gray-400">
-          Map of Nigerian States
-        </text>
-
-        <g filter="url(#mapShadow)">
-          {stateNodes}
-        </g>
-
-        <text
-          x="50"
-          y="82"
-          textAnchor="middle"
-          fontSize="7"
-          fill="#9ca3af"
-          className="dark:fill-gray-400"
+      {!mounted ? (
+        <div
+          className="flex h-[min(520px,72vh)] w-full items-center justify-center rounded-xl bg-gradient-to-br from-slate-100 to-slate-200 dark:from-gray-700 dark:to-gray-800"
+          aria-hidden
         >
-          Click states for details • {totalHeadlines} total headlines
-        </text>
-      </svg>
+          <div className="flex flex-col items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
+            Loading map…
+          </div>
+        </div>
+      ) : (
+        <NigeriaMapLeaflet {...props} />
+      )}
 
-      <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+      <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#e5e7eb' }}></div>
+          <div className="h-3 w-3 rounded-full bg-gray-400" />
           <span className="text-gray-600 dark:text-gray-400">None</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#4ade80' }}></div>
-          <span className="text-gray-600 dark:text-gray-400">1-4</span>
+          <div className="h-3 w-3 rounded-full bg-green-500" />
+          <span className="text-gray-600 dark:text-gray-400">1–4</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#0ea5e9' }}></div>
-          <span className="text-gray-600 dark:text-gray-400">5-14</span>
+          <div className="h-3 w-3 rounded-full bg-sky-500" />
+          <span className="text-gray-600 dark:text-gray-400">5–14</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#f97316' }}></div>
-          <span className="text-gray-600 dark:text-gray-400">15-29</span>
+          <div className="h-3 w-3 rounded-full bg-orange-500" />
+          <span className="text-gray-600 dark:text-gray-400">15–29</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#dc2626' }}></div>
+          <div className="h-3 w-3 rounded-full bg-red-600" />
           <span className="text-gray-600 dark:text-gray-400">30+</span>
         </div>
       </div>
 
-      {selectedState && (
-        <div className="mt-4 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+      <p className="mt-2 text-center text-[11px] text-gray-500 dark:text-gray-400">
+        {totalHeadlines} headline{totalHeadlines === 1 ? '' : 's'} in current feed data
+      </p>
+
+      {props.selectedState && (
+        <div className="mt-4 rounded-lg border border-orange-200 bg-orange-50 p-3 dark:border-orange-800 dark:bg-orange-900/20">
           <div className="flex items-center gap-2">
             <div className="flex-1">
-              <p className="font-semibold text-orange-900 dark:text-orange-100">{selectedState.name} State</p>
-              <p className="text-sm text-orange-800 dark:text-orange-200">{selectedState.capital} • {selectedState.region}</p>
+              <p className="font-semibold text-orange-900 dark:text-orange-100">
+                {props.selectedState.name} State
+              </p>
+              <p className="text-sm text-orange-800 dark:text-orange-200">
+                {props.selectedState.capital} • {props.selectedState.region}
+              </p>
             </div>
-            {(stateCounts[selectedState.name] || 0) > 0 && (
-              <div className="flex items-center gap-1 bg-white dark:bg-gray-700 px-2 py-1 rounded">
-                <Zap className="w-4 h-4 text-orange-500" />
-                <span className="font-bold text-orange-600 dark:text-orange-300">{stateCounts[selectedState.name]}</span>
+            {(props.stateCounts?.[props.selectedState.name] || 0) > 0 && (
+              <div className="flex items-center gap-1 rounded bg-white px-2 py-1 dark:bg-gray-700">
+                <Zap className="h-4 w-4 text-orange-500" />
+                <span className="font-bold text-orange-600 dark:text-orange-300">
+                  {props.stateCounts![props.selectedState.name]}
+                </span>
               </div>
             )}
           </div>

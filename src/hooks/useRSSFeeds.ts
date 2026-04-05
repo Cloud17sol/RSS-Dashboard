@@ -59,6 +59,15 @@ const DEFAULT_FEEDS = [
   { name: "The Guardian Nigeria", url: "https://guardian.ng/feed/" },
   { name: "Vanguard", url: "https://www.vanguardngr.com/feed/" },
   { name: "ThisDay Live", url: "https://www.thisdaylive.com/index.php/feed/" },
+  { name: "Nigerian Tribune", url: "https://tribuneonlineng.com/feed/" },
+  { name: "BusinessDay Nigeria", url: "https://businessday.ng/feed/" },
+  { name: "TheCable", url: "https://www.thecable.ng/feed" },
+  { name: "The Sun Nigeria", url: "https://sunnewsonline.com/feed/" },
+  { name: "Daily Post Nigeria", url: "https://dailypost.ng/feed/" },
+  { name: "Ripples Nigeria", url: "https://www.ripplesnigeria.com/feed/" },
+  { name: "Naija News", url: "https://www.naijanews.com/feed/" },
+  { name: "TechCabal", url: "https://techcabal.com/feed/" },
+  { name: "Voice of Nigeria (VON)", url: "https://www.von.gov.ng/feed/" },
   { name: "BBC News", url: "https://feeds.bbci.co.uk/news/rss.xml" },
   { name: "Daily Trust", url: "https://dailytrust.com/feed" },
   { name: "The Nation", url: "https://thenationonlineng.net/feed/" },
@@ -67,8 +76,10 @@ const DEFAULT_FEEDS = [
   { name: "Pulse Nigeria - General", url: "https://www.pulse.ng/news/rss" },
   { name: "Channels News", url: "https://www.channelstv.com/feed" },
   { name: "P.M. News", url: "https://pmnewsnigeria.com/feed" },
-  { name: "Premium Times", url: "https://www.premiumtimesng.com/feed" },
-  { name: "BBC News Hausa", url: "https://www.bbc.com/hausa/index.xml" }
+  { name: "Premium Times", url: "https://www.premiumtimesng.com/feed/" },
+  { name: "BBC News Hausa", url: "https://www.bbc.com/hausa/index.xml" },
+  { name: "RFI English — Africa", url: "https://www.rfi.fr/en/africa/rss" },
+  { name: "Africanews", url: "https://www.africanews.com/feed/rss" }
 ];
 
 const useRSSFeeds = () => {

@@ -174,6 +174,7 @@ function App() {
                   feed={feed}
                   onToggleExpand={toggleFeedExpansion}
                   onPreviewFeed={handlePreviewFeed}
+                  onRefreshFeed={() => refreshFeed(feed)}
                   onRemove={handleRemoveFeed}
                   onDragStart={handleDragStart}
                   onDragOver={handleDragOver}

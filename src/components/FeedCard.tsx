@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalLink, ChevronDown, ChevronUp, MoreHorizontal, Minus, Plus, GripVertical, Trash2 } from 'lucide-react';
+import { ExternalLink, ChevronDown, MoreHorizontal, Minus, Plus, GripVertical, Trash2 } from 'lucide-react';
 
 interface FeedItem {
   title: string;
@@ -24,6 +24,7 @@ interface FeedCardProps {
   feed: Feed;
   onToggleExpand: (feedId: string) => void;
   onPreviewFeed: () => void;
+  onRefreshFeed: () => void;
   onRemove?: (feedId: string) => void;
   onDragStart?: (e: React.DragEvent, feedId: string) => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -35,6 +36,7 @@ const FeedCard: React.FC<FeedCardProps> = ({
   feed, 
   onToggleExpand, 
   onPreviewFeed,
+  onRefreshFeed,
   onRemove,
   onDragStart,
   onDragOver,
@@ -129,6 +131,15 @@ const FeedCard: React.FC<FeedCardProps> = ({
               {feed.newCount}
             </span>
           )}
+          <button
+            type="button"
+            onClick={onRefreshFeed}
+            className="ml-1 rounded px-2 py-1 text-xs font-medium text-gray-500 transition-colors hover:bg-orange-50 hover:text-orange-600 dark:text-gray-400 dark:hover:bg-orange-950/50 dark:hover:text-orange-400"
+            title={`Refresh ${feed.name}`}
+            aria-label={`Refresh ${feed.name}`}
+          >
+            Refresh
+          </button>
           {onRemove && (
             <button
               type="button"

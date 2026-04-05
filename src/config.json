@@ -1,0 +1,24 @@
+{
+  "feeds": [
+    {
+      "name": "The Guardian Nigeria",
+      "url": "https://guardian.ng/feed/"
+    },
+    {
+      "name": "Punch Newspapers",
+      "url": "https://punchng.com/feed/"
+    },
+    {
+      "name": "Vanguard",
+      "url": "https://www.vanguardngr.com/feed/"
+    },
+    {
+      "name": "ThisDay Live",
+      "url": "https://www.thisdaylive.com/index.php/feed/"
+    },
+    {
+      "name": "Premium Times",
+      "url": "https://www.premiumtimesng.com/feed"
+    }
+  ]
+}

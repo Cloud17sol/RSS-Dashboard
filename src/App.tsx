@@ -1,47 +1,15 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import Header from './components/Header';
 import FeedCard from './components/FeedCard';
-import DashboardFeedToolbar, {
-  type DashboardFeedFilter,
-  type DashboardFeedSort
-} from './components/DashboardFeedToolbar';
 import TabNavigation from './components/TabNavigation';
 import SearchTab from './components/SearchTab';
 import MapTab from './components/MapTab';
 import SettingsTab from './components/SettingsTab';
 import HistoryPanel from './components/HistoryPanel';
 import HistoryTab from './components/HistoryTab';
-import useRSSFeeds from './hooks/useRSSFeeds';
-import type { Feed } from './hooks/useRSSFeeds';
+import useRSSFeeds, { feedShowsOnDashboard } from './hooks/useRSSFeeds';
+import DashboardFeedsTab from './components/DashboardFeedsTab';
 import './styles.css';
-
-const DASH_FILTER_KEY = 'naija_rss_dash_filter_v1';
-const DASH_SORT_KEY = 'naija_rss_dash_sort_v1';
-
-function parseDashFilter(v: string | null): DashboardFeedFilter {
-  return v === 'active' || v === 'errors' ? v : 'all';
-}
-
-function parseDashSort(v: string | null): DashboardFeedSort {
-  const allowed: DashboardFeedSort[] = [
-    'saved',
-    'itemsDesc',
-    'itemsAsc',
-    'newDesc',
-    'newAsc',
-    'refreshedDesc',
-    'refreshedAsc',
-    'nameAsc',
-    'nameDesc',
-    'errorsFirst',
-    'errorsLast'
-  ];
-  return allowed.includes(v as DashboardFeedSort) ? (v as DashboardFeedSort) : 'errorsLast';
-}
-
-function compareFeedName(a: Feed, b: Feed): number {
-  return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-}
 
 function App() {
   const {
@@ -62,86 +30,19 @@ function App() {
     toggleFeedExpansion,
     updateFeeds,
     resetToDefaults,
-    fetchFeed
+    fetchFeed,
+    refreshFeed
   } = useRSSFeeds();
 
   const [showHistory, setShowHistory] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [allExpanded, setAllExpanded] = useState(false);
   const [draggedFeedId, setDraggedFeedId] = useState<string | null>(null);
-  const [dashFilter, setDashFilter] = useState<DashboardFeedFilter>(() =>
-    parseDashFilter(localStorage.getItem(DASH_FILTER_KEY))
+
+  const dashboardFeeds = useMemo(
+    () => feeds.filter(f => feedShowsOnDashboard(f)),
+    [feeds]
   );
-  const [dashSort, setDashSort] = useState<DashboardFeedSort>(() =>
-    parseDashSort(localStorage.getItem(DASH_SORT_KEY))
-  );
-
-  useEffect(() => {
-    localStorage.setItem(DASH_FILTER_KEY, dashFilter);
-  }, [dashFilter]);
-
-  useEffect(() => {
-    localStorage.setItem(DASH_SORT_KEY, dashSort);
-  }, [dashSort]);
-
-  const activeFeedCount = useMemo(() => feeds.filter(f => f.status === 'ok').length, [feeds]);
-  const inactiveFeedCount = useMemo(() => feeds.filter(f => f.status === 'err').length, [feeds]);
-
-  const dashboardFeeds = useMemo(() => {
-    let list = [...feeds];
-    if (dashFilter === 'active') list = list.filter(f => f.status === 'ok');
-    if (dashFilter === 'errors') list = list.filter(f => f.status === 'err');
-
-    if (dashSort === 'itemsDesc') {
-      list.sort((a, b) => {
-        const d = b.items.length - a.items.length;
-        return d !== 0 ? d : compareFeedName(a, b);
-      });
-    } else if (dashSort === 'itemsAsc') {
-      list.sort((a, b) => {
-        const d = a.items.length - b.items.length;
-        return d !== 0 ? d : compareFeedName(a, b);
-      });
-    } else if (dashSort === 'newDesc') {
-      list.sort((a, b) => {
-        const d = b.newCount - a.newCount;
-        return d !== 0 ? d : compareFeedName(a, b);
-      });
-    } else if (dashSort === 'newAsc') {
-      list.sort((a, b) => {
-        const d = a.newCount - b.newCount;
-        return d !== 0 ? d : compareFeedName(a, b);
-      });
-    } else if (dashSort === 'refreshedDesc') {
-      list.sort((a, b) => {
-        const ta = a.lastRefresh?.getTime() ?? 0;
-        const tb = b.lastRefresh?.getTime() ?? 0;
-        const d = tb - ta;
-        return d !== 0 ? d : compareFeedName(a, b);
-      });
-    } else if (dashSort === 'refreshedAsc') {
-      list.sort((a, b) => {
-        const ta = a.lastRefresh?.getTime() ?? Number.POSITIVE_INFINITY;
-        const tb = b.lastRefresh?.getTime() ?? Number.POSITIVE_INFINITY;
-        const d = ta - tb;
-        return d !== 0 ? d : compareFeedName(a, b);
-      });
-    } else if (dashSort === 'nameAsc') {
-      list.sort((a, b) => compareFeedName(a, b));
-    } else if (dashSort === 'nameDesc') {
-      list.sort((a, b) => compareFeedName(b, a));
-    } else if (dashSort === 'errorsFirst') {
-      const inactive = list.filter(f => f.status === 'err');
-      const active = list.filter(f => f.status === 'ok');
-      list = [...inactive, ...active];
-    } else if (dashSort === 'errorsLast') {
-      const active = list.filter(f => f.status === 'ok');
-      const inactive = list.filter(f => f.status === 'err');
-      list = [...active, ...inactive];
-    }
-
-    return list;
-  }, [feeds, dashFilter, dashSort]);
 
   const handleThemeToggle = () => {
     const isDark = document.documentElement.classList.contains('dark');
@@ -233,18 +134,6 @@ function App() {
     updateFeeds(feeds.filter(f => f.id !== feedId));
   };
 
-  const handleRemoveAllInactiveFeeds = () => {
-    if (inactiveFeedCount === 0) return;
-    if (
-      !window.confirm(
-        `Remove all ${inactiveFeedCount} inactive feed${inactiveFeedCount === 1 ? '' : 's'}? This cannot be undone.`
-      )
-    ) {
-      return;
-    }
-    updateFeeds(feeds.filter(f => f.status !== 'err'));
-  };
-
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
       <Header
@@ -272,19 +161,6 @@ function App() {
       <main className="app-main" role="main">
         {activeTab === 'dashboard' && (
           <>
-            {feeds.length > 0 && (
-              <DashboardFeedToolbar
-                filter={dashFilter}
-                sort={dashSort}
-                onFilterChange={setDashFilter}
-                onSortChange={setDashSort}
-                totalFeeds={feeds.length}
-                visibleCount={dashboardFeeds.length}
-                activeCount={activeFeedCount}
-                inactiveCount={inactiveFeedCount}
-                onRemoveAllInactive={handleRemoveAllInactiveFeeds}
-              />
-            )}
             <section
               className="grid"
               aria-label="Feeds Grid"
@@ -315,29 +191,35 @@ function App() {
               )}
 
               {feeds.length > 0 && dashboardFeeds.length === 0 && (
-                <div className="col-span-full flex flex-col items-center justify-center gap-2 py-12 text-center">
+                <div className="col-span-full flex flex-col items-center justify-center gap-2 py-12 px-4 text-center">
                   <p className="text-gray-600 dark:text-gray-300">
-                    No feeds match this filter. Try <strong>All</strong> or another view.
+                    No feeds are enabled for the home grid.
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setDashFilter('all')}
-                    className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600"
-                  >
-                    Show all feeds
-                  </button>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Turn sources on using the <strong>+ / −</strong> tab.
+                  </p>
                 </div>
               )}
+
             </section>
           </>
         )}
 
+        {activeTab === 'dashboard-feeds' && (
+          <DashboardFeedsTab
+            feeds={feeds}
+            onUpdateFeeds={updateFeeds}
+            onRefreshFeed={refreshFeed}
+            onOpenSettings={() => setActiveTab('settings')}
+          />
+        )}
+
         {activeTab === 'search' && (
-          <SearchTab feeds={feeds} />
+          <SearchTab feeds={feeds.filter(feedShowsOnDashboard)} />
         )}
 
         {activeTab === 'map' && (
-          <MapTab feeds={feeds} />
+          <MapTab feeds={feeds.filter(feedShowsOnDashboard)} />
         )}
 
         {activeTab === 'settings' && (

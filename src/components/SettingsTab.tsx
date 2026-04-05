@@ -51,7 +51,8 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         name: feedName.trim(),
         url: urlNorm,
         items: [],
-        newCount: 0
+        newCount: 0,
+        showOnDashboard: updatedFeeds[existingFeedIndex].showOnDashboard
       };
       onUpdateFeeds(updatedFeeds);
     } else {
@@ -63,7 +64,8 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
         items: [],
         status: 'ok',
         newCount: 0,
-        expanded: false
+        expanded: false,
+        showOnDashboard: false
       };
       onUpdateFeeds([...feeds, newFeed]);
     }
@@ -89,7 +91,12 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
 
   const handleExport = () => {
     const data = {
-      feeds: feeds.map(({ id, name, url }) => ({ id, name, url })),
+      feeds: feeds.map(({ id, name, url, showOnDashboard }) => ({
+        id,
+        name,
+        url,
+        showOnDashboard: showOnDashboard !== false
+      })),
       interval: settings.refreshInterval,
       theme: settings.theme,
       notifs: settings.notifications ? 'on' : 'off',
@@ -114,15 +121,19 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
       const data = JSON.parse(text);
       
       if (Array.isArray(data.feeds)) {
-        const importedFeeds = data.feeds.map((f: { id?: string; name: string; url: string }) => ({
-          id: typeof f.id === 'string' && f.id.length > 0 ? f.id : stableFeedId(f.url),
-          name: f.name,
-          url: f.url,
-          items: [],
-          status: 'ok',
-          newCount: 0,
-          expanded: false
-        }));
+        const importedFeeds = data.feeds.map(
+          (f: { id?: string; name: string; url: string; showOnDashboard?: boolean }) => ({
+            id: typeof f.id === 'string' && f.id.length > 0 ? f.id : stableFeedId(f.url),
+            name: f.name,
+            url: f.url,
+            items: [],
+            status: 'ok',
+            newCount: 0,
+            expanded: false,
+            showOnDashboard:
+              typeof f.showOnDashboard === 'boolean' ? f.showOnDashboard : false
+          })
+        );
         onUpdateFeeds(importedFeeds);
       }
 

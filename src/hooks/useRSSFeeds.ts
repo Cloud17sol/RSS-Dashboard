@@ -18,6 +18,12 @@ export interface Feed {
   newCount: number;
   loading?: boolean;
   expanded?: boolean;
+  /** When false, feed stays in Settings but is not loaded or shown on the dashboard. */
+  showOnDashboard?: boolean;
+}
+
+export function feedShowsOnDashboard(f: { showOnDashboard?: boolean }): boolean {
+  return f.showOnDashboard !== false;
 }
 
 interface HistoryItem {
@@ -29,6 +35,7 @@ interface SavedFeedRow {
   id?: string;
   name: string;
   url: string;
+  showOnDashboard?: boolean;
 }
 
 type SeenMapState = Record<string, Record<string, boolean>>;
@@ -168,19 +175,11 @@ const STORAGE_KEYS = {
   CARDS_PER_ROW: 'naija_rss_cards_per_row_v1'
 };
 
+/** Thirteen defaults — add more in Settings, then enable on the +/− tab. */
 const DEFAULT_FEEDS = [
   { name: "The Guardian Nigeria", url: "https://guardian.ng/feed/" },
   { name: "Vanguard", url: "https://www.vanguardngr.com/feed/" },
   { name: "ThisDay Live", url: "https://www.thisdaylive.com/index.php/feed/" },
-  { name: "Nigerian Tribune", url: "https://tribuneonlineng.com/feed/" },
-  { name: "BusinessDay Nigeria", url: "https://businessday.ng/feed/" },
-  { name: "TheCable", url: "https://www.thecable.ng/feed" },
-  { name: "The Sun Nigeria", url: "https://sunnewsonline.com/feed/" },
-  { name: "Daily Post Nigeria", url: "https://dailypost.ng/feed/" },
-  { name: "Ripples Nigeria", url: "https://www.ripplesnigeria.com/feed/" },
-  { name: "Naija News", url: "https://www.naijanews.com/feed/" },
-  { name: "TechCabal", url: "https://techcabal.com/feed/" },
-  { name: "Voice of Nigeria (VON)", url: "https://www.von.gov.ng/feed/" },
   { name: "BBC News", url: "https://feeds.bbci.co.uk/news/rss.xml" },
   { name: "Daily Trust", url: "https://dailytrust.com/feed" },
   { name: "The Nation", url: "https://thenationonlineng.net/feed/" },
@@ -190,9 +189,7 @@ const DEFAULT_FEEDS = [
   { name: "Channels News", url: "https://www.channelstv.com/feed" },
   { name: "P.M. News", url: "https://pmnewsnigeria.com/feed" },
   { name: "Premium Times", url: "https://www.premiumtimesng.com/feed/" },
-  { name: "BBC News Hausa", url: "https://www.bbc.com/hausa/index.xml" },
-  { name: "RFI English — Africa", url: "https://www.rfi.fr/en/africa/rss" },
-  { name: "Africanews", url: "https://www.africanews.com/feed/rss" }
+  { name: "BBC News Hausa", url: "https://www.bbc.com/hausa/index.xml" }
 ];
 
 const useRSSFeeds = () => {
@@ -415,9 +412,9 @@ const useRSSFeeds = () => {
     }
   };
 
-  // Refresh all feeds (batched to avoid rss2json 429 and seen-map races)
+  // Refresh all feeds (batched — only sources enabled for the dashboard)
   const refreshAll = useCallback(async () => {
-    const queue = [...feeds];
+    const queue = feeds.filter(f => feedShowsOnDashboard(f));
     while (queue.length) {
       const batch = queue.splice(0, REFRESH_CONCURRENCY);
       await Promise.all(batch.map(f => refreshFeed(f)));
@@ -471,7 +468,12 @@ const useRSSFeeds = () => {
   // Save feeds to localStorage (ids stable across reloads)
   const saveFeeds = (feedsToSave: Feed[]) => {
     const settings = {
-      feeds: feedsToSave.map(({ id, name, url }) => ({ id, name, url }))
+      feeds: feedsToSave.map(({ id, name, url, showOnDashboard }) => ({
+        id,
+        name,
+        url,
+        showOnDashboard: feedShowsOnDashboard({ showOnDashboard })
+      }))
     };
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
   };
@@ -549,7 +551,8 @@ const useRSSFeeds = () => {
       items: [],
       status: 'ok' as const,
       newCount: 0,
-      expanded: false
+      expanded: false,
+      showOnDashboard: true as const
     }));
     
     setFeeds(defaultFeeds);
@@ -567,9 +570,20 @@ const useRSSFeeds = () => {
   // Initialize
   useEffect(() => {
     const initializeFeeds = async () => {
-      const saved = getSavedFeeds();
+      let saved = getSavedFeeds();
       const cachedFeeds = readFeedCache();
-      
+      let migratedDashboardVisibility = false;
+
+      if (saved && saved.length > 13) {
+        const lacksVisibility = saved.every(
+          (f: SavedFeedRow) => typeof f.showOnDashboard !== 'boolean'
+        );
+        if (lacksVisibility) {
+          saved = saved.map((f, i) => ({ ...f, showOnDashboard: i < 13 }));
+          migratedDashboardVisibility = true;
+        }
+      }
+
       let initialFeeds: Feed[];
       if (saved && saved.length) {
         initialFeeds = saved.map((f: SavedFeedRow) => {
@@ -583,9 +597,13 @@ const useRSSFeeds = () => {
             lastRefresh: cached?.lastRefresh ? new Date(cached.lastRefresh) : undefined,
             status: 'ok' as const,
             newCount: 0,
-            expanded: false
+            expanded: false,
+            showOnDashboard: f.showOnDashboard !== false
           };
         });
+        if (migratedDashboardVisibility) {
+          saveFeeds(initialFeeds);
+        }
       } else {
         initialFeeds = DEFAULT_FEEDS.map(f => {
           const id = stableFeedId(f.url);
@@ -598,7 +616,8 @@ const useRSSFeeds = () => {
             lastRefresh: cached?.lastRefresh ? new Date(cached.lastRefresh) : undefined,
             status: 'ok' as const,
             newCount: 0,
-            expanded: false
+            expanded: false,
+            showOnDashboard: true
           };
         });
         saveFeeds(initialFeeds);
@@ -617,7 +636,7 @@ const useRSSFeeds = () => {
       // Initial refresh (batched — same reasons as refreshAll)
       setTimeout(() => {
         (async () => {
-          const q = [...initialFeeds];
+          const q = initialFeeds.filter(f => feedShowsOnDashboard(f));
           while (q.length) {
             const batch = q.splice(0, REFRESH_CONCURRENCY);
             await Promise.all(batch.map(feed => refreshFeed(feed, true)));

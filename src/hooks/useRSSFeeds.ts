@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { stableFeedId } from '../lib/feedId';
 
-interface FeedItem {
+export interface FeedItem {
   title: string;
   link: string;
   pubDate: string | null;
   content: string;
 }
 
-interface Feed {
+export interface Feed {
   id: string;
   name: string;
   url: string;
@@ -31,18 +31,80 @@ interface SavedFeedRow {
   url: string;
 }
 
+type SeenMapState = Record<string, Record<string, boolean>>;
+
 const idForSavedRow = (f: SavedFeedRow): string =>
   typeof f.id === 'string' && f.id.length > 0 ? f.id : stableFeedId(f.url);
 
-const pruneSeenForFeedIds = (
-  feedIds: Set<string>,
-  raw: Record<string, Record<string, boolean>>
-) => {
-  const next: Record<string, Record<string, boolean>> = {};
+const pruneSeenForFeedIds = (feedIds: Set<string>, raw: SeenMapState) => {
+  const next: SeenMapState = {};
   for (const id of feedIds) {
     if (raw[id]) next[id] = raw[id];
   }
   return next;
+};
+
+/** Limits parallel rss2json calls (free tier rate-limits hard on burst). */
+const REFRESH_CONCURRENCY = 5;
+const REFRESH_BATCH_GAP_MS = 500;
+
+const mapRss2JsonItem = (i: Record<string, unknown>, fallbackUrl: string): FeedItem => ({
+  title: (i.title as string) || '(no title)',
+  link: (i.link as string) || fallbackUrl,
+  pubDate: (i.pubDate || i.pub_date || i.pubdate) as string | null | undefined || null,
+  content: (i.content || i.description || '') as string
+});
+
+/** Parse RSS 2.0 or Atom; `null` means not valid XML. */
+const parseFeedItemsFromXml = (xmlText: string, fallbackUrl: string): FeedItem[] | null => {
+  const xml = new DOMParser().parseFromString(xmlText, 'application/xml');
+  if (xml.querySelector('parsererror')) return null;
+
+  const rssItems = [...xml.querySelectorAll('item')];
+  if (rssItems.length > 0) {
+    return rssItems.map(it => {
+      const linkEl = it.querySelector('link');
+      const link =
+        linkEl?.textContent?.trim() ||
+        linkEl?.getAttribute('href') ||
+        it.querySelector('guid')?.textContent?.trim() ||
+        fallbackUrl;
+      return {
+        title: it.querySelector('title')?.textContent?.trim() || '(no title)',
+        link,
+        pubDate: it.querySelector('pubDate')?.textContent?.trim() || null,
+        content:
+          it.querySelector('description')?.textContent ||
+          it.getElementsByTagNameNS('http://purl.org/rss/1.0/modules/content/', 'encoded')[0]
+            ?.textContent ||
+          ''
+      };
+    });
+  }
+
+  const entries = [...xml.querySelectorAll('entry')];
+  if (entries.length > 0) {
+    return entries.map(e => {
+      const withHref = e.querySelector('link[href]');
+      const link =
+        withHref?.getAttribute('href') ||
+        e.querySelector('link')?.getAttribute('href') ||
+        e.querySelector('link')?.textContent?.trim() ||
+        fallbackUrl;
+      return {
+        title: e.querySelector('title')?.textContent?.trim() || '(no title)',
+        link,
+        pubDate:
+          e.querySelector('updated')?.textContent?.trim() ||
+          e.querySelector('published')?.textContent?.trim() ||
+          null,
+        content:
+          e.querySelector('content')?.textContent || e.querySelector('summary')?.textContent || ''
+      };
+    });
+  }
+
+  return [];
 };
 
 const STORAGE_KEYS = {
@@ -100,8 +162,8 @@ const useRSSFeeds = () => {
     +localStorage.getItem(STORAGE_KEYS.CARDS_PER_ROW)! || 4
   );
   const [countdown, setCountdown] = useState('Next in —');
-  const [seenMap, setSeenMap] = useState(() =>
-    JSON.parse(localStorage.getItem(STORAGE_KEYS.SEEN) || '{}')
+  const [seenMap, setSeenMap] = useState<SeenMapState>(() =>
+    JSON.parse(localStorage.getItem(STORAGE_KEYS.SEEN) || '{}') as SeenMapState
   );
   const [history, setHistory] = useState<HistoryItem[]>([]);
   
@@ -127,54 +189,70 @@ const useRSSFeeds = () => {
     return String(h);
   };
 
-  // Fetch RSS feed with CORS handling
+  // Fetch RSS feed with CORS handling (several strategies; rss2json rate-limits parallel use)
   const fetchFeed = async (url: string): Promise<FeedItem[]> => {
     const rssUrl = safeURL(url);
     if (!rssUrl) throw new Error('Invalid URL');
 
-    // Strategy 1: rss2json
-    try {
-      const r2j = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
-      const res = await fetch(r2j, { cache: 'no-store' });
-      if (res.ok) {
+    const tryRss2Json = async (): Promise<FeedItem[] | null> => {
+      try {
+        const r2j = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
+        const res = await fetch(r2j, { cache: 'no-store' });
+        if (!res.ok) return null;
         const data = await res.json();
-        if (data && data.items && Array.isArray(data.items)) {
-          return data.items.map((i: any) => ({
-            title: i.title || '(no title)',
-            link: i.link || rssUrl,
-            pubDate: i.pubDate || i.pub_date || i.pubdate || null,
-            content: i.content || i.description || ''
-          }));
-        }
+        if (data?.status !== 'ok' || !Array.isArray(data.items)) return null;
+        if (data.items.length === 0) return null;
+        return data.items.map((i: Record<string, unknown>) => mapRss2JsonItem(i, rssUrl));
+      } catch {
+        return null;
       }
-    } catch (_) {}
+    };
 
-    // Strategy 2: allorigins + parse XML
-    const ao = `https://api.allorigins.win/raw?url=${encodeURIComponent(rssUrl)}`;
-    const res = await fetch(ao, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-    const text = await res.text();
-    const xml = new DOMParser().parseFromString(text, 'application/xml');
-    if (xml.querySelector('parsererror')) throw new Error('XML parse error');
+    const tryAlloriginsRaw = async (): Promise<FeedItem[] | null> => {
+      try {
+        const res = await fetch(
+          `https://api.allorigins.win/raw?url=${encodeURIComponent(rssUrl)}`,
+          { cache: 'no-store' }
+        );
+        if (!res.ok) return null;
+        const text = await res.text();
+        const parsed = parseFeedItemsFromXml(text, rssUrl);
+        if (parsed === null) return null;
+        if (parsed.length === 0) return null;
+        return parsed;
+      } catch {
+        return null;
+      }
+    };
 
-    const items = [...xml.querySelectorAll('item')];
-    if (items.length === 0) {
-      // Try Atom format
-      const entries = [...xml.querySelectorAll('entry')];
-      return entries.map(e => ({
-        title: e.querySelector('title')?.textContent?.trim() || '(no title)',
-        link: e.querySelector('link')?.getAttribute('href') || rssUrl,
-        pubDate: e.querySelector('updated')?.textContent || e.querySelector('published')?.textContent || null,
-        content: e.querySelector('content')?.textContent || e.querySelector('summary')?.textContent || ''
-      }));
-    }
+    const tryAlloriginsGet = async (): Promise<FeedItem[] | null> => {
+      try {
+        const res = await fetch(
+          `https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`,
+          { cache: 'no-store' }
+        );
+        if (!res.ok) return null;
+        const data = await res.json();
+        const contents = typeof data.contents === 'string' ? data.contents : '';
+        if (!contents.trim()) return null;
+        const parsed = parseFeedItemsFromXml(contents, rssUrl);
+        if (parsed === null || parsed.length === 0) return null;
+        return parsed;
+      } catch {
+        return null;
+      }
+    };
 
-    return items.map(it => ({
-      title: it.querySelector('title')?.textContent?.trim() || '(no title)',
-      link: it.querySelector('link')?.textContent?.trim() || it.querySelector('guid')?.textContent || rssUrl,
-      pubDate: it.querySelector('pubDate')?.textContent || it.querySelector('dc\\:date')?.textContent || null,
-      content: it.querySelector('description')?.textContent || ''
-    }));
+    const fromR2j = await tryRss2Json();
+    if (fromR2j?.length) return fromR2j;
+
+    const fromRaw = await tryAlloriginsRaw();
+    if (fromRaw?.length) return fromRaw;
+
+    const fromGet = await tryAlloriginsGet();
+    if (fromGet?.length) return fromGet;
+
+    throw new Error('Could not load feed (proxies blocked or feed unavailable)');
   };
 
   // Notification handling
@@ -216,33 +294,57 @@ const useRSSFeeds = () => {
     try {
       const items = await fetchFeed(feed.url);
 
-      // Track new items
-      const seen = seenMap[feed.id] || {};
-      const isFirstFetch = Object.keys(seen).length === 0;
       let newCount = 0;
+      let isFirstFetch = true;
 
-      items.forEach(item => {
-        const hash = hashLink(item.link || item.title);
-        if (!seen[hash]) {
-          newCount++;
-          seen[hash] = true;
-        }
+      setSeenMap(prev => {
+        const priorSeen = prev[feed.id] || {};
+        isFirstFetch = Object.keys(priorSeen).length === 0;
+        const seen = { ...priorSeen };
+        newCount = 0;
+        items.forEach(item => {
+          const hash = hashLink(item.link || item.title);
+          if (!seen[hash]) {
+            newCount++;
+            seen[hash] = true;
+          }
+        });
+        const next = { ...prev, [feed.id]: seen };
+        localStorage.setItem(STORAGE_KEYS.SEEN, JSON.stringify(next));
+        return next;
       });
 
-      const newSeenMap = { ...seenMap, [feed.id]: seen };
-      setSeenMap(newSeenMap);
-      localStorage.setItem(STORAGE_KEYS.SEEN, JSON.stringify(newSeenMap));
+      setFeeds(prev => {
+        const wasErr = prev.find(f => f.id === feed.id)?.status === 'err';
+        let next = prev.map(f =>
+          f.id === feed.id
+            ? {
+                ...f,
+                items,
+                newCount: isFirstFetch ? 0 : newCount,
+                lastRefresh: new Date(),
+                status: 'ok' as const,
+                loading: false
+              }
+            : f
+        );
 
-      setFeeds(prev => prev.map(f =>
-        f.id === feed.id ? {
-          ...f,
-          items,
-          newCount: isFirstFetch ? 0 : newCount,
-          lastRefresh: new Date(),
-          status: 'ok' as const,
-          loading: false
-        } : f
-      ));
+        // Inactive → active: keep others fixed; place this card at end of the active block (saved order).
+        if (wasErr) {
+          const idx = next.findIndex(f => f.id === feed.id);
+          if (idx !== -1) {
+            const [moved] = next.splice(idx, 1);
+            let insertAt = 0;
+            for (let j = 0; j < next.length; j++) {
+              if (next[j].status === 'ok') insertAt = j + 1;
+            }
+            next.splice(insertAt, 0, moved);
+            saveFeeds(next);
+          }
+        }
+
+        return next;
+      });
 
       // Only notify for new items after initial load
       if (newCount > 0 && !isFirstFetch && !isInitialLoad) {
@@ -262,9 +364,16 @@ const useRSSFeeds = () => {
     }
   };
 
-  // Refresh all feeds
+  // Refresh all feeds (batched to avoid rss2json 429 and seen-map races)
   const refreshAll = useCallback(async () => {
-    await Promise.all(feeds.map(refreshFeed));
+    const queue = [...feeds];
+    while (queue.length) {
+      const batch = queue.splice(0, REFRESH_CONCURRENCY);
+      await Promise.all(batch.map(f => refreshFeed(f)));
+      if (queue.length) {
+        await new Promise(r => setTimeout(r, REFRESH_BATCH_GAP_MS));
+      }
+    }
   }, [feeds, seenMap]);
 
   // Start countdown timer
@@ -366,7 +475,7 @@ const useRSSFeeds = () => {
   };
 
   // Update feeds
-  const updateFeeds = (newFeeds: Feed[]) => {
+  const updateFeeds: (newFeeds: Feed[]) => void = newFeeds => {
     setFeeds(newFeeds);
     saveFeeds(newFeeds);
     setSeenMap(prev => {
@@ -442,9 +551,16 @@ const useRSSFeeds = () => {
       setFeeds(initialFeeds);
       applyTheme();
 
-      // Initial refresh
+      // Initial refresh (batched — same reasons as refreshAll)
       setTimeout(() => {
-        Promise.all(initialFeeds.map(feed => refreshFeed(feed, true)));
+        (async () => {
+          const q = [...initialFeeds];
+          while (q.length) {
+            const batch = q.splice(0, REFRESH_CONCURRENCY);
+            await Promise.all(batch.map(feed => refreshFeed(feed, true)));
+            if (q.length) await new Promise(r => setTimeout(r, REFRESH_BATCH_GAP_MS));
+          }
+        })();
       }, 100);
     };
 

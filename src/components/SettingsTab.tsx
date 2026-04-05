@@ -1,16 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, Download, RotateCcw, CreditCard as Edit, Trash2, Plus, Settings as SettingsIcon } from 'lucide-react';
 import { stableFeedId } from '../lib/feedId';
-
-interface Feed {
-  id: string;
-  name: string;
-  url: string;
-  items: any[];
-  status: string;
-  newCount: number;
-  expanded?: boolean;
-}
+import type { Feed } from '../hooks/useRSSFeeds';
 
 interface Settings {
   refreshInterval: number;
@@ -214,7 +205,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({
                 <div className="flex items-center gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
                   <span className="flex items-center gap-1">
                     <span className={`w-2 h-2 rounded-full ${feed.status === 'ok' ? 'bg-green-500' : 'bg-red-500'}`} />
-                    {feed.status === 'ok' ? 'Connected' : 'Error'}
+                    {feed.status === 'ok' ? 'Connected' : 'Inactive'}
                   </span>
                   <span>{feed.items?.length || 0} items</span>
                   {feed.newCount > 0 && (

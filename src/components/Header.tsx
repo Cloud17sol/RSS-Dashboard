@@ -11,7 +11,7 @@ interface HeaderProps {
   notifications: boolean;
   onNotificationToggle: () => void;
   sound: boolean;
-  onSoundToggle: () => void;
+  onSoundToggle: (enabled: boolean) => void;
   onHistoryToggle: () => void;
   onSettingsToggle: () => void;
   allExpanded: boolean;

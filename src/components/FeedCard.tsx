@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExternalLink, ChevronDown, ChevronUp, MoreHorizontal, Minus, Plus, GripVertical } from 'lucide-react';
+import { ExternalLink, ChevronDown, ChevronUp, MoreHorizontal, Minus, Plus, GripVertical, Trash2 } from 'lucide-react';
 
 interface FeedItem {
   title: string;
@@ -24,6 +24,7 @@ interface FeedCardProps {
   feed: Feed;
   onToggleExpand: (feedId: string) => void;
   onPreviewFeed: () => void;
+  onRemove?: (feedId: string) => void;
   onDragStart?: (e: React.DragEvent, feedId: string) => void;
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent, targetFeedId: string) => void;
@@ -34,6 +35,7 @@ const FeedCard: React.FC<FeedCardProps> = ({
   feed, 
   onToggleExpand, 
   onPreviewFeed,
+  onRemove,
   onDragStart,
   onDragOver,
   onDrop,
@@ -126,6 +128,17 @@ const FeedCard: React.FC<FeedCardProps> = ({
             <span className="badge" title="New items" aria-live="polite">
               {feed.newCount}
             </span>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              onClick={() => onRemove(feed.id)}
+              className="ml-1 rounded p-1 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+              title="Remove feed from dashboard"
+              aria-label={`Remove ${feed.name} from dashboard`}
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           )}
         </div>
       </header>

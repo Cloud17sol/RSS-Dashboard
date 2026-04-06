@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ListPlus, Search, Settings } from 'lucide-react';
+import { ListChecks, ListPlus, ListX, Search, Settings } from 'lucide-react';
 import { feedShowsOnDashboard, type Feed } from '../hooks/useRSSFeeds';
 
 interface DashboardFeedsTabProps {
@@ -27,6 +27,41 @@ const DashboardFeedsTab: React.FC<DashboardFeedsTabProps> = ({
     );
   }, [feeds, nameQuery]);
 
+  const SELECT_ALL_ID = '__select_all__';
+
+  const selectAllOnDashboard = async () => {
+    if (feeds.length === 0) return;
+    const nextFeeds = feeds.map(f => ({ ...f, showOnDashboard: true as const }));
+    const toRefresh = feeds.filter(f => !feedShowsOnDashboard(f));
+    onUpdateFeeds(nextFeeds);
+    if (toRefresh.length === 0) return;
+
+    setLoadingId(SELECT_ALL_ID);
+    try {
+      const gapMs = 150;
+      const concurrency = 5;
+      for (let i = 0; i < toRefresh.length; i += concurrency) {
+        const batch = toRefresh.slice(i, i + concurrency);
+        await Promise.all(
+          batch.map(f => {
+            const u = nextFeeds.find(x => x.id === f.id);
+            return u ? onRefreshFeed(u) : Promise.resolve();
+          })
+        );
+        if (i + concurrency < toRefresh.length) {
+          await new Promise(r => setTimeout(r, gapMs));
+        }
+      }
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const deselectAllOnDashboard = () => {
+    if (feeds.length === 0) return;
+    onUpdateFeeds(feeds.map(f => ({ ...f, showOnDashboard: false })));
+  };
+
   const toggleDashboard = async (feed: Feed) => {
     const nextShow = !feedShowsOnDashboard(feed);
     const nextFeeds = feeds.map(f =>
@@ -47,10 +82,12 @@ const DashboardFeedsTab: React.FC<DashboardFeedsTabProps> = ({
   };
 
   const shown = feeds.filter(feedShowsOnDashboard).length;
+  const allOnDashboard = feeds.length > 0 && shown === feeds.length;
+  const selectAllBusy = loadingId === SELECT_ALL_ID;
 
   return (
     <div className="mx-auto max-w-3xl p-4 sm:p-6">
-      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="rounded-lg bg-orange-100 p-2 dark:bg-orange-950/50">
             <ListPlus className="h-7 w-7 text-orange-600 dark:text-orange-400" aria-hidden />
@@ -75,6 +112,37 @@ const DashboardFeedsTab: React.FC<DashboardFeedsTabProps> = ({
             </p>
           </div>
         </div>
+
+        {feeds.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              if (allOnDashboard) {
+                deselectAllOnDashboard();
+              } else {
+                void selectAllOnDashboard();
+              }
+            }}
+            disabled={loadingId !== null}
+            className={
+              allOnDashboard
+                ? 'inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-gray-300 bg-gray-100 px-4 py-2.5 text-sm font-semibold text-gray-800 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700'
+                : 'inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-semibold text-orange-800 transition-colors hover:bg-orange-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-orange-800 dark:bg-orange-950/50 dark:text-orange-200 dark:hover:bg-orange-950/80'
+            }
+            title={
+              allOnDashboard
+                ? 'Turn off every source for the home grid (feeds stay in Settings)'
+                : 'Turn on every source for the home grid'
+            }
+          >
+            {allOnDashboard ? (
+              <ListX className="h-4 w-4 shrink-0" aria-hidden />
+            ) : (
+              <ListChecks className="h-4 w-4 shrink-0" aria-hidden />
+            )}
+            {selectAllBusy ? 'Enabling…' : allOnDashboard ? 'Deselect all' : 'Select all'}
+          </button>
+        )}
       </div>
 
       {feeds.length > 0 && (
@@ -114,6 +182,7 @@ const DashboardFeedsTab: React.FC<DashboardFeedsTabProps> = ({
             const on = feedShowsOnDashboard(feed);
             const connected = feed.status === 'ok';
             const busy = loadingId === feed.id;
+            const batchBusy = loadingId === SELECT_ALL_ID;
 
             return (
               <li
@@ -148,7 +217,7 @@ const DashboardFeedsTab: React.FC<DashboardFeedsTabProps> = ({
                       type="button"
                       role="switch"
                       aria-checked={on}
-                      disabled={busy}
+                      disabled={busy || batchBusy}
                       onClick={() => toggleDashboard(feed)}
                       className={`relative inline-flex h-9 w-14 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 ${
                         on ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'

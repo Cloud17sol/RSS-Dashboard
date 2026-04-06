@@ -9,8 +9,53 @@ import HistoryPanel from './components/HistoryPanel';
 import HistoryTab from './components/HistoryTab';
 import useRSSFeeds, { feedShowsOnDashboard } from './hooks/useRSSFeeds';
 import DashboardFeedsTab from './components/DashboardFeedsTab';
-import { ChevronRight, PanelLeft } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import {
+  Building2,
+  ChevronRight,
+  Globe2,
+  Landmark,
+  Layers,
+  Mic2,
+  Newspaper,
+  PanelLeft,
+  Radio,
+  Tv
+} from 'lucide-react';
 import './styles.css';
+
+/** Pick a recognizable icon from the outlet name (keyword heuristics). */
+function readerSourceListIcon(name: string): LucideIcon {
+  const n = name.toLowerCase();
+  if (n.includes('bbc') || n.includes('rfi') || n.includes('hausa')) return Radio;
+  if (n.includes('al jazeera') || n.includes('guardian') || n.includes('reuters')) return Globe2;
+  if (n.includes('business') || n.includes('tribune') || n.includes('trust')) return Building2;
+  if (n.includes('channels') || n.includes('tv')) return Tv;
+  if (n.includes('pulse') || n.includes('thisday') || n.includes('live')) return Mic2;
+  if (n.includes('nation') || n.includes('premium') || n.includes('times')) return Landmark;
+  return Newspaper;
+}
+
+function ReaderSourceIconBadge({
+  Icon,
+  active
+}: {
+  Icon: LucideIcon;
+  active: boolean;
+}) {
+  return (
+    <span
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+        active
+          ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300'
+          : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+      }`}
+      aria-hidden
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+    </span>
+  );
+}
 
 function App() {
   const {
@@ -338,13 +383,16 @@ function App() {
                             setSelectedDashboardFeedId('all');
                             closeReaderDrawer();
                           }}
-                          className={`flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left text-sm transition-colors ${selectedDashboardFeedId === 'all'
+                          className={`flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-3 text-left text-sm transition-colors ${selectedDashboardFeedId === 'all'
                             ? 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/60 dark:text-orange-300'
                             : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900'
                           }`}
                         >
-                          <span className="font-medium">All Sources</span>
-                          <span className="ml-3 text-xs text-gray-500 dark:text-gray-400">{dashboardFeeds.length}</span>
+                          <span className="flex min-w-0 flex-1 items-center gap-2">
+                            <ReaderSourceIconBadge Icon={Layers} active={selectedDashboardFeedId === 'all'} />
+                            <span className="font-medium">All Sources</span>
+                          </span>
+                          <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{dashboardFeeds.length}</span>
                         </button>
 
                         {filteredReaderSources.map(feed => (
@@ -355,13 +403,19 @@ function App() {
                               setSelectedDashboardFeedId(feed.id);
                               closeReaderDrawer();
                             }}
-                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left text-sm transition-colors ${selectedDashboardFeedId === feed.id
+                            className={`flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-3 text-left text-sm transition-colors ${selectedDashboardFeedId === feed.id
                               ? 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/60 dark:text-orange-300'
                               : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900'
                             }`}
                           >
-                            <span className="font-medium">{feed.name}</span>
-                            <span className="ml-3 text-xs text-gray-500 dark:text-gray-400">{feed.items.length}</span>
+                            <span className="flex min-w-0 flex-1 items-center gap-2">
+                              <ReaderSourceIconBadge
+                                Icon={readerSourceListIcon(feed.name)}
+                                active={selectedDashboardFeedId === feed.id}
+                              />
+                              <span className="min-w-0 font-medium">{feed.name}</span>
+                            </span>
+                            <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{feed.items.length}</span>
                           </button>
                         ))}
                       </div>
@@ -398,13 +452,16 @@ function App() {
                   <button
                     type="button"
                     onClick={() => setSelectedDashboardFeedId('all')}
-                    className={`rounded-xl border px-3 py-2 text-left text-sm transition-colors lg:flex lg:w-full lg:items-center lg:justify-between ${selectedDashboardFeedId === 'all'
+                    className={`gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors lg:flex lg:w-full lg:items-center lg:justify-between ${selectedDashboardFeedId === 'all'
                       ? 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/60 dark:text-orange-300'
                       : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900'
                     }`}
                   >
-                    <span className="font-medium">All Sources</span>
-                    <span className="ml-3 text-xs text-gray-500 dark:text-gray-400">{dashboardFeeds.length}</span>
+                    <span className="flex min-w-0 flex-1 items-center gap-2">
+                      <ReaderSourceIconBadge Icon={Layers} active={selectedDashboardFeedId === 'all'} />
+                      <span className="font-medium">All Sources</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{dashboardFeeds.length}</span>
                   </button>
 
                   {filteredReaderSources.map(feed => (
@@ -412,13 +469,19 @@ function App() {
                       key={feed.id}
                       type="button"
                       onClick={() => setSelectedDashboardFeedId(feed.id)}
-                      className={`rounded-xl border px-3 py-2 text-left text-sm transition-colors lg:flex lg:w-full lg:items-center lg:justify-between ${selectedDashboardFeedId === feed.id
+                      className={`gap-2 rounded-xl border px-3 py-2 text-left text-sm transition-colors lg:flex lg:w-full lg:items-center lg:justify-between ${selectedDashboardFeedId === feed.id
                         ? 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/60 dark:text-orange-300'
                         : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900'
                       }`}
                     >
-                      <span className="font-medium">{feed.name}</span>
-                      <span className="ml-3 text-xs text-gray-500 dark:text-gray-400">{feed.items.length}</span>
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <ReaderSourceIconBadge
+                          Icon={readerSourceListIcon(feed.name)}
+                          active={selectedDashboardFeedId === feed.id}
+                        />
+                        <span className="min-w-0 font-medium">{feed.name}</span>
+                      </span>
+                      <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{feed.items.length}</span>
                     </button>
                   ))}
                 </div>

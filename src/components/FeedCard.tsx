@@ -10,6 +10,9 @@ import {
   List
 } from 'lucide-react';
 
+/** Headline count cycle for the expand button: 10 → 20 → 30 → 50 → 100 → 10 */
+const HEADLINE_LIMIT_STEPS = [10, 20, 30, 50, 100] as const;
+
 interface FeedItem {
   title: string;
   link: string;
@@ -134,16 +137,21 @@ const FeedCard: React.FC<FeedCardProps> = ({
 
   const displayItems = Math.min(feed.items.length, displayLimit);
 
-  const getNextDisplayLimit = () => {
-    if (displayLimit === 10) return 20;
-    if (displayLimit === 20) return 30;
-    return 10;
+  const getNextDisplayLimit = (): number => {
+    const i = HEADLINE_LIMIT_STEPS.indexOf(
+      displayLimit as (typeof HEADLINE_LIMIT_STEPS)[number]
+    );
+    if (i === -1) return 10;
+    return HEADLINE_LIMIT_STEPS[(i + 1) % HEADLINE_LIMIT_STEPS.length];
   };
 
-  const getDisplayLimitText = () => {
-    if (displayLimit === 10) return 'Show 20';
-    if (displayLimit === 20) return 'Show 30';
-    return 'Show 10';
+  /** Label shows the next limit after clicking (same pattern as before). */
+  const getNextHeadlinesLabel = (): string => {
+    const i = HEADLINE_LIMIT_STEPS.indexOf(
+      displayLimit as (typeof HEADLINE_LIMIT_STEPS)[number]
+    );
+    if (i === -1) return '10';
+    return String(HEADLINE_LIMIT_STEPS[(i + 1) % HEADLINE_LIMIT_STEPS.length]);
   };
 
   return (
@@ -252,7 +260,7 @@ const FeedCard: React.FC<FeedCardProps> = ({
               onClick={() => setDisplayLimit(getNextDisplayLimit())}
             >
               <ChevronDown className="w-4 h-4 inline mr-1" />
-              Headlines: {getDisplayLimitText().replace('Show ', '')}
+              Headlines: {getNextHeadlinesLabel()}
             </button>
             </div>
           </div>

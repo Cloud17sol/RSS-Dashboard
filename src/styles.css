@@ -292,6 +292,36 @@ body {
 .actions { 
   display: flex; 
   gap: 8px; 
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.actions-wrap {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 138, 61, 0.06);
+}
+
+.actions-title {
+  margin: 0 0 8px 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.btn.btn-option {
+  border-radius: 10px;
+  border-color: rgba(255, 138, 61, 0.35);
+  background: var(--card);
+  font-weight: 600;
+}
+
+.btn.btn-option:hover {
+  background: rgba(255, 138, 61, 0.12);
+  border-color: rgba(255, 138, 61, 0.65);
 }
 
 .progress {
@@ -310,6 +340,29 @@ body {
   display: flex; 
   flex-direction: column; 
   gap: 8px; 
+}
+
+.feed-list--cols-1 {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feed-list--cols-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Keep expanded items in their grid cell so the row does not reflow sideways (avoids scroll jump). */
+.feed-list--cols-2 .feed-item {
+  min-width: 0;
+}
+
+@media (max-width: 480px) {
+  .feed-list--cols-2 {
+    grid-template-columns: 1fr;
+  }
 }
 
 .feed-item {
@@ -360,6 +413,8 @@ body {
   border-radius: 8px;
   font-size: 0.875rem;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 :root.dark .feed-full {

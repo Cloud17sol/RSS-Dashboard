@@ -1,5 +1,14 @@
-import React, { useState } from 'react';
-import { ExternalLink, ChevronDown, MoreHorizontal, Minus, Plus, GripVertical, Trash2 } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import {
+  ExternalLink,
+  ChevronDown,
+  Minus,
+  Plus,
+  GripVertical,
+  Trash2,
+  LayoutGrid,
+  List
+} from 'lucide-react';
 
 interface FeedItem {
   title: string;
@@ -20,10 +29,39 @@ interface Feed {
   expanded?: boolean;
 }
 
+/** Compensate layout shift so the clicked row stays at the same viewport Y. */
+function applyScrollDeltaForElement(el: HTMLElement, deltaY: number) {
+  if (Math.abs(deltaY) < 0.5) return;
+  const html = document.documentElement;
+  const prevBehavior = html.style.scrollBehavior;
+  html.style.scrollBehavior = 'auto';
+
+  let node: HTMLElement | null = el.parentElement;
+  while (node) {
+    const { overflowY } = getComputedStyle(node);
+    if (
+      /(auto|scroll|overlay)/.test(overflowY) &&
+      node.scrollHeight > node.clientHeight + 1
+    ) {
+      node.scrollTop += deltaY;
+      html.style.scrollBehavior = prevBehavior;
+      return;
+    }
+    node = node.parentElement;
+  }
+
+  const sc = document.scrollingElement;
+  if (sc) {
+    sc.scrollTop += deltaY;
+  } else {
+    window.scrollBy(0, deltaY);
+  }
+  html.style.scrollBehavior = prevBehavior;
+}
+
 interface FeedCardProps {
   feed: Feed;
   onToggleExpand: (feedId: string) => void;
-  onPreviewFeed: () => void;
   onRefreshFeed: () => void;
   onRemove?: (feedId: string) => void;
   onDragStart?: (e: React.DragEvent, feedId: string) => void;
@@ -35,7 +73,6 @@ interface FeedCardProps {
 const FeedCard: React.FC<FeedCardProps> = ({ 
   feed, 
   onToggleExpand, 
-  onPreviewFeed,
   onRefreshFeed,
   onRemove,
   onDragStart,
@@ -45,6 +82,9 @@ const FeedCard: React.FC<FeedCardProps> = ({
 }) => {
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
   const [displayLimit, setDisplayLimit] = useState(10);
+  /** Article list layout: two columns by default. */
+  const [articleColumns, setArticleColumns] = useState<'one' | 'two'>('two');
+  const itemRefs = useRef<Record<number, HTMLLIElement | null>>({});
 
   // Use feed.expanded to determine if card is collapsed
   const effectivelyCollapsed = !feed.expanded;
@@ -59,13 +99,31 @@ const FeedCard: React.FC<FeedCardProps> = ({
   };
 
   const toggleItemExpand = (index: number) => {
-    const newExpanded = new Set(expandedItems);
-    if (newExpanded.has(index)) {
-      newExpanded.delete(index);
-    } else {
-      newExpanded.add(index);
-    }
-    setExpandedItems(newExpanded);
+    const itemEl = itemRefs.current[index];
+    const topBeforeToggle = itemEl?.getBoundingClientRect().top;
+
+    setExpandedItems(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+
+    if (typeof topBeforeToggle !== 'number') return;
+
+    // Wait for React commit + layout (grid reflow). Double rAF beats one frame of layout lag.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const currentEl = itemRefs.current[index];
+        if (!currentEl) return;
+        const topAfterToggle = currentEl.getBoundingClientRect().top;
+        const scrollDelta = topAfterToggle - topBeforeToggle;
+        applyScrollDeltaForElement(currentEl, scrollDelta);
+      });
+    });
   };
 
   const stripHtml = (html: string) => {
@@ -163,18 +221,40 @@ const FeedCard: React.FC<FeedCardProps> = ({
         <span className="count">{feed.items?.length || 0} items</span>
           </div>
       
-          <div className="actions">
+          <div className="actions-wrap" aria-label="Article display options">
+            <p className="actions-title">Article display options</p>
+            <div className="actions">
             <button
-              className="btn ghost btn-expand"
+              type="button"
+              className="btn btn-option"
+              onClick={() => setArticleColumns(c => (c === 'two' ? 'one' : 'two'))}
+              aria-pressed={articleColumns === 'two'}
+              title={
+                articleColumns === 'two'
+                  ? 'Show articles in one column'
+                  : 'Show articles in two columns'
+              }
+            >
+              {articleColumns === 'two' ? (
+                <>
+                  <LayoutGrid className="w-4 h-4 inline mr-1" aria-hidden />
+                  Layout: 2 columns
+                </>
+              ) : (
+                <>
+                  <List className="w-4 h-4 inline mr-1" aria-hidden />
+                  Layout: 1 column
+                </>
+              )}
+            </button>
+            <button
+              className="btn btn-option btn-expand"
               onClick={() => setDisplayLimit(getNextDisplayLimit())}
             >
               <ChevronDown className="w-4 h-4 inline mr-1" />
-              {getDisplayLimitText()}
+              Headlines: {getDisplayLimitText().replace('Show ', '')}
             </button>
-        <button className="btn ghost btn-more" onClick={onPreviewFeed}>
-          <MoreHorizontal className="w-4 h-4 inline mr-1" />
-          More
-        </button>
+            </div>
           </div>
       
           <div 
@@ -186,9 +266,18 @@ const FeedCard: React.FC<FeedCardProps> = ({
         aria-hidden="true"
           />
       
-          <ul className="feed-list" role="list">
+          <ul
+            className={`feed-list ${articleColumns === 'two' ? 'feed-list--cols-2' : 'feed-list--cols-1'}`}
+            role="list"
+          >
         {feed.items.slice(0, displayItems).map((item, index) => (
-          <li key={index} className="feed-item">
+          <li
+            key={index}
+            className={`feed-item ${expandedItems.has(index) ? 'feed-item--expanded' : ''}`}
+            ref={el => {
+              itemRefs.current[index] = el;
+            }}
+          >
             <p className="feed-title">{item.title}</p>
             <div className="feed-meta">
               {item.pubDate ? formatTime(new Date(item.pubDate)) : '—'}

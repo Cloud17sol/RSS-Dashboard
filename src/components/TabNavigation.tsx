@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, ListPlus, History, Search, Map } from 'lucide-react';
+import { Home, ListPlus, History, Search, Map, Newspaper } from 'lucide-react';
 
 interface TabNavigationProps {
   activeTab: string;
@@ -9,6 +9,7 @@ interface TabNavigationProps {
 const TabNavigation: React.FC<TabNavigationProps> = ({ activeTab, onTabChange }) => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: Home },
+    { id: 'dashboard-reader', label: 'Reader View', icon: Newspaper },
     { id: 'dashboard-feeds', label: '+ / −', icon: ListPlus },
     { id: 'search', label: 'Search', icon: Search },
     { id: 'map', label: 'Map', icon: Map },

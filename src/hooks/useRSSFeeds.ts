@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { stableFeedId } from '../lib/feedId';
 
 export interface FeedItem {
@@ -31,6 +31,30 @@ interface HistoryItem {
   at: Date;
 }
 
+interface StoredArticleHistoryItem {
+  id: string;
+  feedId: string;
+  feedName: string;
+  title: string;
+  link: string;
+  pubDate: string | null;
+  content: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+interface ArticleHistoryItem {
+  id: string;
+  feedId: string;
+  feedName: string;
+  title: string;
+  link: string;
+  pubDate: string | null;
+  content: string;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+}
+
 interface SavedFeedRow {
   id?: string;
   name: string;
@@ -58,6 +82,10 @@ const REFRESH_BATCH_GAP_MS = 150;
 const FEED_CACHE_KEY = 'naija_rss_feed_items_v1';
 const FEED_CACHE_TTL_MS = 10 * 60 * 1000;
 
+const ARTICLE_HISTORY_KEY = 'naija_rss_article_history_v1';
+const ARTICLE_HISTORY_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+const ARTICLE_HISTORY_MAX_ITEMS = 400;
+
 type FeedCacheState = Record<string, {
   items: FeedItem[];
   lastRefresh: string | null;
@@ -69,12 +97,10 @@ const readFeedCache = (): FeedCacheState => {
     if (!raw) return {};
 
     const parsed = JSON.parse(raw) as {
-      timestamp?: number;
       feeds?: FeedCacheState;
     };
 
-    if (!parsed.timestamp || !parsed.feeds) return {};
-    if (Date.now() - parsed.timestamp > FEED_CACHE_TTL_MS) return {};
+    if (!parsed.feeds) return {};
 
     return parsed.feeds;
   } catch {
@@ -97,13 +123,117 @@ const writeFeedCache = (feeds: Feed[]) => {
     localStorage.setItem(
       FEED_CACHE_KEY,
       JSON.stringify({
-        timestamp: Date.now(),
         feeds: next
       })
     );
   } catch {
     // Ignore cache write failures.
   }
+};
+
+/** True when lastRefresh age is at least minAgeMs (or cache is empty / invalid). */
+const feedNeedsNetworkRefreshAfterMs = (feed: Feed, minAgeMs: number) => {
+  if (!feed.lastRefresh || !feed.items.length) return true;
+  const age = Date.now() - feed.lastRefresh.getTime();
+  if (!Number.isFinite(age)) return true;
+  return age >= minAgeMs;
+};
+
+/** Startup: use cache TTL (independent of user refresh interval). */
+const feedNeedsInitialNetworkRefresh = (feed: Feed) =>
+  feedNeedsNetworkRefreshAfterMs(feed, FEED_CACHE_TTL_MS);
+
+const normalizeArticleIdPart = (value: string | null | undefined) =>
+  (value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
+const createArticleHistoryId = (feedId: string, item: FeedItem) => {
+  const normalizedLink = normalizeArticleIdPart(item.link);
+  if (normalizedLink) return `${feedId}::${normalizedLink}`;
+
+  const normalizedTitle = normalizeArticleIdPart(item.title);
+  const normalizedDate = normalizeArticleIdPart(item.pubDate);
+  return `${feedId}::${normalizedTitle}::${normalizedDate}`;
+};
+
+const readArticleHistory = (): StoredArticleHistoryItem[] => {
+  try {
+    const raw = localStorage.getItem(ARTICLE_HISTORY_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw) as StoredArticleHistoryItem[];
+    if (!Array.isArray(parsed)) return [];
+
+    const cutoff = Date.now() - ARTICLE_HISTORY_RETENTION_MS;
+
+    return parsed.filter(item => {
+      const lastSeenAt = new Date(item.lastSeenAt).getTime();
+      return Number.isFinite(lastSeenAt) && lastSeenAt >= cutoff;
+    }).slice(0, ARTICLE_HISTORY_MAX_ITEMS);
+  } catch {
+    return [];
+  }
+};
+
+const writeArticleHistory = (items: StoredArticleHistoryItem[]) => {
+  try {
+    localStorage.setItem(
+      ARTICLE_HISTORY_KEY,
+      JSON.stringify(items.slice(0, ARTICLE_HISTORY_MAX_ITEMS))
+    );
+  } catch {
+    // Ignore cache write failures.
+  }
+};
+
+const mergeArticleHistoryItems = (
+  previous: StoredArticleHistoryItem[],
+  feed: Pick<Feed, 'id' | 'name'>,
+  items: FeedItem[]
+) => {
+  const byId = new Map(previous.map(item => [item.id, item]));
+  const nowIso = new Date().toISOString();
+
+  for (const item of items) {
+    const id = createArticleHistoryId(feed.id, item);
+    const existing = byId.get(id);
+
+    if (existing) {
+      byId.set(id, {
+        ...existing,
+        title: item.title,
+        link: item.link,
+        pubDate: item.pubDate,
+        content: item.content,
+        lastSeenAt: nowIso
+      });
+      continue;
+    }
+
+    byId.set(id, {
+      id,
+      feedId: feed.id,
+      feedName: feed.name,
+      title: item.title,
+      link: item.link,
+      pubDate: item.pubDate,
+      content: item.content,
+      firstSeenAt: nowIso,
+      lastSeenAt: nowIso
+    });
+  }
+
+  const cutoff = Date.now() - ARTICLE_HISTORY_RETENTION_MS;
+
+  return [...byId.values()]
+    .filter(item => {
+      const lastSeenAt = new Date(item.lastSeenAt).getTime();
+      return Number.isFinite(lastSeenAt) && lastSeenAt >= cutoff;
+    })
+    .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+    .slice(0, ARTICLE_HISTORY_MAX_ITEMS);
 };
 
 const mapRss2JsonItem = (i: Record<string, unknown>, fallbackUrl: string): FeedItem => ({
@@ -172,7 +302,8 @@ const STORAGE_KEYS = {
   NOTIFS: 'naija_rss_notifs_v1',
   SOUND: 'naija_rss_sound_v1',
   SEEN: 'naija_rss_seen_map_v1',
-  CARDS_PER_ROW: 'naija_rss_cards_per_row_v1'
+  CARDS_PER_ROW: 'naija_rss_cards_per_row_v1',
+  ARTICLE_HISTORY_UI: 'naija_rss_article_history_ui_v1',
 };
 
 /** Thirteen defaults — add more in Settings, then enable on the +/− tab. */
@@ -210,13 +341,54 @@ const useRSSFeeds = () => {
     +localStorage.getItem(STORAGE_KEYS.CARDS_PER_ROW)! || 4
   );
   const [countdown, setCountdown] = useState('Next in —');
-  const [seenMap, setSeenMap] = useState<SeenMapState>(() =>
+  const [, setSeenMap] = useState<SeenMapState>(() =>
     JSON.parse(localStorage.getItem(STORAGE_KEYS.SEEN) || '{}') as SeenMapState
   );
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  
+  const [history, setHistory] = useState<HistoryItem[]>(() => {
+    const stored = localStorage.getItem(STORAGE_KEYS.ARTICLE_HISTORY_UI);
+    if (!stored) return [];
+
+    try {
+      const parsed = JSON.parse(stored) as Array<{ text: string; at: string }>;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map(item => ({
+        text: item.text,
+        at: new Date(item.at)
+      }));
+    } catch {
+      return [];
+    }
+  });
+
+  const articleHistory = useMemo<ArticleHistoryItem[]>(() => {
+    return readArticleHistory().map(item => ({
+      ...item,
+      firstSeenAt: new Date(item.firstSeenAt),
+      lastSeenAt: new Date(item.lastSeenAt)
+    }));
+  }, [feeds]);
+
+  const todayArticles = useMemo<ArticleHistoryItem[]>(() => {
+    const now = new Date();
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      0, 0, 0, 0
+    ).getTime();
+
+    return articleHistory.filter(item => item.firstSeenAt.getTime() >= startOfToday);
+  }, [articleHistory]);
+
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const inFlightFeedRefreshRef = useRef<Set<string>>(new Set());
+  const refreshAllRunningRef = useRef(false);
+  const countdownMsRef = useRef(0);
+  const refreshIntervalRef = useRef(refreshInterval);
+  const refreshAllRef = useRef<() => Promise<void>>(async () => {});
+
+  refreshIntervalRef.current = refreshInterval;
 
   // Safe URL validation
   const safeURL = (url: string) => {
@@ -330,11 +502,24 @@ const useRSSFeeds = () => {
       text: `${title} — ${body}`,
       at: new Date()
     };
-    setHistory(prev => [historyItem, ...prev].slice(0, 50));
+    setHistory(prev => {
+      const next = [historyItem, ...prev].slice(0, 50);
+      localStorage.setItem(
+        STORAGE_KEYS.ARTICLE_HISTORY_UI,
+        JSON.stringify(next.map(item => ({ text: item.text, at: item.at.toISOString() })))
+      );
+      return next;
+    });
   };
 
   // Refresh single feed
   const refreshFeed = async (feed: Feed, isInitialLoad: boolean = false) => {
+    if (inFlightFeedRefreshRef.current.has(feed.id)) {
+      return;
+    }
+
+    inFlightFeedRefreshRef.current.add(feed.id);
+
     setFeeds(prev => prev.map(f =>
       f.id === feed.id ? { ...f, loading: true } : f
     ));
@@ -394,37 +579,100 @@ const useRSSFeeds = () => {
         return next;
       });
 
+      const mergedArticleHistory = mergeArticleHistoryItems(
+        readArticleHistory(),
+        { id: feed.id, name: feed.name },
+        items
+      );
+      writeArticleHistory(mergedArticleHistory);
+
       // Only notify for new items after initial load
       if (newCount > 0 && !isFirstFetch && !isInitialLoad) {
         notify(feed.name, `${newCount} new headline${newCount > 1 ? 's' : ''}`);
       } else if (isFirstFetch && items.length > 0 && !isInitialLoad) {
-        // For first time loading a feed (not initial app load), add to history
         const historyItem: HistoryItem = {
           text: `${feed.name} — Loaded ${items.length} headline${items.length > 1 ? 's' : ''}`,
           at: new Date()
         };
-        setHistory(prev => [historyItem, ...prev].slice(0, 50));
+        setHistory(prev => {
+          const next = [historyItem, ...prev].slice(0, 50);
+          localStorage.setItem(
+            STORAGE_KEYS.ARTICLE_HISTORY_UI,
+            JSON.stringify(next.map(item => ({ text: item.text, at: item.at.toISOString() })))
+          );
+          return next;
+        });
       }
     } catch (error) {
       setFeeds(prev => prev.map(f =>
         f.id === feed.id ? { ...f, status: 'err' as const, loading: false } : f
       ));
+    } finally {
+      inFlightFeedRefreshRef.current.delete(feed.id);
     }
   };
 
-  // Refresh all feeds (batched — only sources enabled for the dashboard)
-  const refreshAll = useCallback(async () => {
-    const queue = feeds.filter(f => feedShowsOnDashboard(f));
-    while (queue.length) {
-      const batch = queue.splice(0, REFRESH_CONCURRENCY);
-      await Promise.all(batch.map(f => refreshFeed(f)));
-      if (queue.length) {
-        await new Promise(r => setTimeout(r, REFRESH_BATCH_GAP_MS));
-      }
+  // Refresh all feeds (batched — only sources enabled for the dashboard).
+  // When staleOnly is true (timer / visibility via refreshAllRef), skip feeds newer than the selected refresh interval.
+  const refreshAll = useCallback(async (staleOnly?: boolean) => {
+    if (refreshAllRunningRef.current) {
+      return;
     }
-  }, [feeds, seenMap]);
 
-  // Start countdown timer
+    refreshAllRunningRef.current = true;
+
+    try {
+      const queue = feeds.filter(f => {
+        if (!feedShowsOnDashboard(f)) return false;
+        if (staleOnly) {
+          const iv = refreshIntervalRef.current;
+          if (!iv || iv <= 0) return false;
+          return feedNeedsNetworkRefreshAfterMs(f, iv);
+        }
+        return true;
+      });
+      while (queue.length) {
+        const batch = queue.splice(0, REFRESH_CONCURRENCY);
+        await Promise.all(batch.map(f => refreshFeed(f)));
+        if (queue.length) {
+          await new Promise(r => setTimeout(r, REFRESH_BATCH_GAP_MS));
+        }
+      }
+    } finally {
+      refreshAllRunningRef.current = false;
+    }
+  }, [feeds]);
+
+  refreshAllRef.current = async () => {
+    await refreshAll(true);
+  };
+
+  const hasStaleDashboardFeeds = useCallback(() => {
+    const now = Date.now();
+
+    return feeds.some(feed => {
+      if (!feedShowsOnDashboard(feed)) return false;
+      if (!feed.lastRefresh) return true;
+      return now - feed.lastRefresh.getTime() >= refreshIntervalRef.current;
+    });
+  }, [feeds]);
+
+  const tickCountdown = useCallback(() => {
+    const interval = refreshIntervalRef.current;
+    if (!interval || interval <= 0) return;
+
+    countdownMsRef.current -= 1000;
+    if (countdownMsRef.current <= 0) {
+      countdownMsRef.current = interval;
+      void refreshAllRef.current();
+    }
+    const secs = Math.max(0, Math.floor(countdownMsRef.current / 1000));
+    const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+    const ss = String(secs % 60).padStart(2, '0');
+    setCountdown(`Next in ${mm}:${ss}`);
+  }, []);
+
+  // Start countdown timer (paused while tab is hidden — see visibility effect)
   const startTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (countdownRef.current) clearInterval(countdownRef.current);
@@ -434,23 +682,54 @@ const useRSSFeeds = () => {
       return;
     }
 
-    let countdownTime = refreshInterval;
-    
-    const updateCountdown = () => {
-      countdownTime -= 1000;
-      if (countdownTime <= 0) {
-        countdownTime = refreshInterval;
-        refreshAll();
-      }
-      const secs = Math.max(0, Math.floor(countdownTime / 1000));
+    refreshIntervalRef.current = refreshInterval;
+    countdownMsRef.current = refreshInterval;
+
+    const syncLabelFromRef = () => {
+      const secs = Math.max(0, Math.floor(countdownMsRef.current / 1000));
       const mm = String(Math.floor(secs / 60)).padStart(2, '0');
       const ss = String(secs % 60).padStart(2, '0');
       setCountdown(`Next in ${mm}:${ss}`);
     };
 
-    updateCountdown();
-    countdownRef.current = setInterval(updateCountdown, 1000);
-  }, [refreshInterval, refreshAll]);
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      syncLabelFromRef();
+      return;
+    }
+
+    tickCountdown();
+    countdownRef.current = setInterval(tickCountdown, 1000);
+  }, [refreshInterval, tickCountdown]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (!refreshIntervalRef.current || refreshIntervalRef.current <= 0) return;
+
+      if (document.visibilityState === 'hidden') {
+        if (countdownRef.current) {
+          clearInterval(countdownRef.current);
+          countdownRef.current = null;
+        }
+        return;
+      }
+
+      if (hasStaleDashboardFeeds()) {
+        countdownMsRef.current = refreshIntervalRef.current;
+        void refreshAllRef.current();
+      }
+
+      const secs = Math.max(0, Math.floor(countdownMsRef.current / 1000));
+      const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+      const ss = String(secs % 60).padStart(2, '0');
+      setCountdown(`Next in ${mm}:${ss}`);
+
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      countdownRef.current = setInterval(tickCountdown, 1000);
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [tickCountdown, hasStaleDashboardFeeds]);
 
   // Theme management
   const applyTheme = useCallback((themePref: string = theme) => {
@@ -543,6 +822,7 @@ const useRSSFeeds = () => {
   const resetToDefaults = async () => {
     Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key));
     localStorage.removeItem(FEED_CACHE_KEY);
+    localStorage.removeItem(ARTICLE_HISTORY_KEY);
     
     const defaultFeeds = DEFAULT_FEEDS.map(f => ({
       id: stableFeedId(f.url),
@@ -633,10 +913,12 @@ const useRSSFeeds = () => {
       setFeeds(initialFeeds);
       applyTheme();
 
-      // Initial refresh (batched — same reasons as refreshAll)
+      // Initial refresh (batched — same reasons as refreshAll); skip feeds still fresh in cache
       setTimeout(() => {
         (async () => {
-          const q = initialFeeds.filter(f => feedShowsOnDashboard(f));
+          const q = initialFeeds.filter(
+            f => feedShowsOnDashboard(f) && feedNeedsInitialNetworkRefresh(f)
+          );
           while (q.length) {
             const batch = q.splice(0, REFRESH_CONCURRENCY);
             await Promise.all(batch.map(feed => refreshFeed(feed, true)));
@@ -670,6 +952,8 @@ const useRSSFeeds = () => {
     cardsPerRow,
     countdown,
     history,
+    articleHistory,
+    todayArticles,
     refreshAll,
     refreshFeed,
     setRefreshInterval,

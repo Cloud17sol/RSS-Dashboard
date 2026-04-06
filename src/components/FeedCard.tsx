@@ -10,7 +10,7 @@ import {
   List
 } from 'lucide-react';
 
-/** Headline count cycle for the expand button: 10 → 20 → 30 → 50 → 100 → 10 */
+/** Headline count cycle for the expand button (default 20): 20 → 30 → 50 → 100 → 10 → 20 */
 const HEADLINE_LIMIT_STEPS = [10, 20, 30, 50, 100] as const;
 
 interface FeedItem {
@@ -84,7 +84,7 @@ const FeedCard: React.FC<FeedCardProps> = ({
   isDragging
 }) => {
   const [expandedItems, setExpandedItems] = useState<Set<number>>(new Set());
-  const [displayLimit, setDisplayLimit] = useState(10);
+  const [displayLimit, setDisplayLimit] = useState(20);
   /** Article list layout: two columns by default. */
   const [articleColumns, setArticleColumns] = useState<'one' | 'two'>('two');
   const itemRefs = useRef<Record<number, HTMLLIElement | null>>({});
@@ -141,7 +141,7 @@ const FeedCard: React.FC<FeedCardProps> = ({
     const i = HEADLINE_LIMIT_STEPS.indexOf(
       displayLimit as (typeof HEADLINE_LIMIT_STEPS)[number]
     );
-    if (i === -1) return 10;
+    if (i === -1) return 20;
     return HEADLINE_LIMIT_STEPS[(i + 1) % HEADLINE_LIMIT_STEPS.length];
   };
 
@@ -150,7 +150,7 @@ const FeedCard: React.FC<FeedCardProps> = ({
     const i = HEADLINE_LIMIT_STEPS.indexOf(
       displayLimit as (typeof HEADLINE_LIMIT_STEPS)[number]
     );
-    if (i === -1) return '10';
+    if (i === -1) return '20';
     return String(HEADLINE_LIMIT_STEPS[(i + 1) % HEADLINE_LIMIT_STEPS.length]);
   };
 

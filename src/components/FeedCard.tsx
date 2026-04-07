@@ -192,11 +192,9 @@ const FeedCard: React.FC<FeedCardProps> = ({
             className={`status-dot ${feed.status}`} 
             title="Connection status"
           />
-          {feed.newCount > 0 && (
-            <span className="badge" title="New items" aria-live="polite">
-              {feed.newCount}
-            </span>
-          )}
+          <span className="badge" title="Total items" aria-live="polite">
+            {feed.items?.length || 0}
+          </span>
           <button
             type="button"
             onClick={onRefreshFeed}
